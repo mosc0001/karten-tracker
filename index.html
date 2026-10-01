@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Karten">
+<meta name="theme-color" content="#0d1322">
+<title>Karten-Tracker</title>
+<style>
+:root{--bg:#eef1f6;--surface:#fff;--ink:#14213d;--muted:#5b6784;--line:#d9deea;--accent:#2f5bea;--accent-ink:#fff;--danger:#b3261e;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1322;--surface:#151d33;--ink:#e8ecf7;--muted:#9aa5c4;--line:#27314d;--accent:#7b9bff;--accent-ink:#0d1322;--danger:#ff8a80}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 ui-rounded,"Avenir Next",system-ui,-apple-system,"Segoe UI",sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+body.lock{overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+button:disabled{opacity:.55;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{margin:0;line-height:1.2}
+.wrap{max-width:720px;margin:0 auto;padding:0 16px 120px}
+.pad{padding:24px 16px}
+.muted{color:var(--muted)}
+.err{color:var(--danger)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 0 8px}
+.top h1{font-size:1.25rem}
+.actions{display:flex;gap:8px}
+.primary{background:var(--accent);color:var(--accent-ink);border:0;border-radius:12px;padding:12px 18px;font-weight:600}
+.ghost{background:none;border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.danger{background:none;border:1px solid var(--danger);color:var(--danger);border-radius:12px;padding:12px}
+.wide{display:block;width:100%;margin-top:12px}
+.sleeve{margin:8px 0 20px;padding:20px;border-radius:18px;border:2px solid transparent;background:linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(115deg,#7ad0ff,#b69cff,#ff9fcb,#ffd979,#8fe9c0) border-box}
+.total{margin:0;font-size:clamp(2.4rem,11vw,3.4rem);font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.sub{margin:4px 0 0;color:var(--muted);font-size:.9rem}
+.list{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.row{display:grid;grid-template-columns:52px 1fr auto;gap:12px;align-items:center;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:12px 0}
+.thumb{width:52px;height:72px;object-fit:contain;border-radius:4px;background:var(--line)}
+.name{font-weight:600}
+.meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;color:var(--muted);font-size:.85rem;margin-top:2px}
+.tag{border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:.78rem;color:var(--muted)}
+.tag.foil{border-color:transparent;background:linear-gradient(115deg,#7ad0ff66,#b69cff66,#ff9fcb66,#ffd97966);color:var(--ink)}
+.price{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.price small{display:block;font-weight:400;color:var(--muted);font-size:.8rem}
+.empty{padding:32px 0;color:var(--muted)}
+.note{margin-top:24px;color:var(--muted);font-size:.85rem}
+.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));box-shadow:0 6px 18px rgba(10,16,36,.35);padding:14px 22px;border-radius:999px}
+.login{max-width:360px;margin:18vh auto 0;padding:0 16px}
+.login h1{font-size:1.6rem;margin-bottom:16px}
+label{display:block;margin-top:12px;font-size:.9rem;color:var(--muted)}
+input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:4px}
+.check{display:flex;gap:10px;align-items:flex-start;color:var(--ink)}
+.check input{width:auto;margin-top:4px}
+.backdrop{position:fixed;inset:0;background:rgba(8,12,24,.55);display:flex;align-items:flex-end;justify-content:center;z-index:10}
+.sheet{background:var(--surface);width:100%;max-width:720px;max-height:92vh;overflow:auto;border-radius:20px 20px 0 0;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}
+@media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px}
+.sheet-head h2{font-size:1.15rem}
+.seg{display:flex;gap:6px;margin:8px 0}
+.seg button{flex:1;padding:10px;border:1px solid var(--line);background:none;border-radius:10px}
+.seg .on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.searchrow{display:flex;gap:8px}
+.searchrow input{margin-top:0}
+.results{list-style:none;padding:0;margin:12px 0 0}
+.pick{display:flex;gap:12px;align-items:center;width:100%;background:none;border:0;border-bottom:1px solid var(--line);padding:8px 0;text-align:left}
+.pick img,.noimg{width:44px;height:61px;object-fit:contain;border-radius:4px;flex:none}
+.noimg{background:var(--line)}
+.pick small{display:block;color:var(--muted)}
+.preview{display:flex;gap:14px;margin-top:12px}
+.preview img{width:96px;height:auto;border-radius:6px;align-self:flex-start}
+.preview p{margin:2px 0}
+.hist{margin:12px 0}
+.hist svg{width:100%;height:auto;display:block}
+.range{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:.8rem}
+.plines{list-style:none;padding:0;margin:12px 0 0}
+.plines li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.plines small{grid-column:1/-1;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(() => {
+"use strict";
+
+const SUPABASE_URL = "https://etybhxsxnovicwlsoiha.supabase.co";
+const SUPABASE_KEY = "sb_publishable_L4T61xqNhqn9QyOYW_IGPg_I70TkeeL";
+const TCGDEX = "https://api.tcgdex.net/v2";
+
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const eur = n => (n == null || Number.isNaN(n)) ? "–" : new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(n);
+const today = () => new Date().toISOString().slice(0, 10);
+const fmtDate = d => d ? new Date(d + "T00:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+
+const CONDITIONS = [["MT", "Mint"], ["NM", "Near Mint"], ["EX", "Excellent"], ["GD", "Good"], ["LP", "Light Played"], ["PL", "Played"], ["PO", "Poor"]];
+const SRC = {
+  cm_trend: "Cardmarket-Trend (alle Sprachen)",
+  cm_lang_floor: "Cardmarket-Angebote in deiner Sprache",
+  ebay_sold: "eBay-Verkäufe in deiner Sprache"
+};
+
+const state = { cards: [], latest: {} };
+
+const condOptions = sel => CONDITIONS.map(([v, l]) => `<option value="${v}"${v === sel ? " selected" : ""}>${l} (${v})</option>`).join("");
+
+async function tcg(path) {
+  const res = await fetch(`${TCGDEX}/${path}`);
+  if (!res.ok) throw new Error(`TCGdex antwortet mit Status ${res.status}`);
+  return res.json();
+}
+
+function trendOf(tcgCard, foil) {
+  const m = tcgCard && tcgCard.pricing && tcgCard.pricing.cardmarket;
+  if (!m) return null;
+  const v = foil ? m["trend-holo"] : m.trend;
+  return typeof v === "number" ? v : null;
+}
+
+async function saveSnapshot(card, tcgCard) {
+  const v = trendOf(tcgCard, card.foil);
+  if (v == null) return false;
+  const m = tcgCard.pricing.cardmarket;
+  const s = card.foil ? "-holo" : "";
+  const details = {
+    avg7: m["avg7" + s] ?? null,
+    avg30: m["avg30" + s] ?? null,
+    low: m["low" + s] ?? null,
+    finish: card.foil ? "foil" : "normal",
+    updated: m.updated ?? null
+  };
+  const { error } = await db.from("price_snapshots").upsert(
+    { card_id: card.id, captured_on: today(), source: "cm_trend", price_eur: v, details },
+    { onConflict: "card_id,captured_on,source" }
+  );
+  return !error;
+}
+
+/* ---------- Anmeldung ---------- */
+
+function renderLogin(msg = "") {
+  $("#app").innerHTML = `
+    <main class="login">
+      <h1>Karten-Tracker</h1>
+      <input id="em" type="email" placeholder="E-Mail" autocomplete="username">
+      <input id="pw" type="password" placeholder="Passwort" autocomplete="current-password" style="margin-top:10px">
+      <button id="go" class="primary wide">Anmelden</button>
+      <p class="err" id="err">${esc(msg)}</p>
+    </main>`;
+  const go = async () => {
+    $("#err").textContent = "";
+    const { error } = await db.auth.signInWithPassword({ email: $("#em").value.trim(), password: $("#pw").value });
+    if (error) $("#err").textContent = "Anmeldung fehlgeschlagen: " + error.message;
+  };
+  $("#go").onclick = go;
+  $("#pw").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+}
+
+/* ---------- Sammlung ---------- */
+
+async function loadMain() {
+  $("#app").innerHTML = `<p class="muted pad">Sammlung wird geladen …</p>`;
+  const [c, l] = await Promise.all([
+    db.from("cards").select("*").order("created_at", { ascending: false }),
+    db.from("card_latest_prices").select("*")
+  ]);
+  const err = c.error || l.error;
+  if (err) {
+    $("#app").innerHTML = `<p class="err pad">Fehler beim Laden: ${esc(err.message)}</p>`;
+    return;
+  }
+  state.cards = c.data;
+  state.latest = {};
+  for (const r of l.data) {
+    if (!state.latest[r.card_id]) state.latest[r.card_id] = {};
+    state.latest[r.card_id][r.source] = r;
+  }
+  renderMain();
+}
+
+function extraLines(p) {
+  const out = [];
+  if (p.cm_lang_floor) out.push(`Angebote ${eur(Number(p.cm_lang_floor.price_eur))}`);
+  if (p.ebay_sold) out.push(`eBay ${eur(Number(p.ebay_sold.price_eur))}`);
+  return out.join(", ");
+}
+
+function renderMain() {
+  const rows = state.cards.map(c => {
+    const p = state.latest[c.id] || {};
+    const unit = p.cm_trend ? Number(p.cm_trend.price_eur) : null;
+    return { c, p, unit, total: unit == null ? null : unit * c.quantity };
+  }).sort((a, b) => (b.total ?? -1) - (a.total ?? -1));
+
+  const sum = rows.reduce((s, r) => s + (r.total ?? 0), 0);
+  const missing = rows.filter(r => r.unit == null).length;
+  const qty = state.cards.reduce((s, c) => s + c.quantity, 0);
+  const dates = Object.values(state.latest).flatMap(o => Object.values(o)).map(r => r.captured_on).sort();
+  const last = dates.length ? dates[dates.length - 1] : "";
+
+  const list = rows.length ? `<ul class="list" id="list">${rows.map(({ c, p, unit, total }) => {
+    const extra = extraLines(p);
+    return `<li><button class="row" data-id="${esc(c.id)}">
+      ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="thumb"></span>`}
+      <span>
+        <span class="name">${esc(c.name)}</span>
+        <span class="meta"><span>${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
+          <span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}</span>
+      </span>
+      <span class="price">${eur(total)}
+        ${c.quantity > 1 && unit != null ? `<small>${c.quantity} × ${eur(unit)}</small>` : ""}
+        ${extra ? `<small>${esc(extra)}</small>` : ""}
+      </span>
+    </button></li>`;
+  }).join("")}</ul>` : `<p class="empty">Noch keine Karten. Tippe auf „Karte hinzufügen“ und suche nach dem Namen.</p>`;
+
+  $("#app").innerHTML = `
+    <div class="wrap">
+      <header class="top">
+        <h1>Meine Karten</h1>
+        <div class="actions">
+          <button id="refresh" class="ghost">Preise aktualisieren</button>
+          <button id="logout" class="ghost">Abmelden</button>
+        </div>
+      </header>
+      <section class="sleeve">
+        <p class="total">${eur(sum)}</p>
+        <p class="sub">${qty} Karten${last ? ", Preisstand " + fmtDate(last) : ""}</p>
+        ${missing ? `<p class="sub">${missing} Einträge ohne Preis</p>` : ""}
+      </section>
+      ${list}
+      <p class="note">Wert = Cardmarket-Trend über alle Sprachen (Quelle: TCGdex). Deutsche Karten werden oft günstiger gehandelt. Der Zustand fließt in diesen Preis noch nicht ein.</p>
+    </div>
+    <button id="add" class="primary fab">Karte hinzufügen</button>`;
+
+  $("#add").onclick = openAdd;
+  $("#logout").onclick = () => db.auth.signOut();
+  $("#refresh").onclick = refreshAll;
+  const listEl = $("#list");
+  if (listEl) listEl.onclick = e => {
+    const b = e.target.closest("[data-id]");
+    if (b) openDetail(b.dataset.id);
+  };
+}
+
+async function refreshAll() {
+  const btn = $("#refresh");
+  const queue = state.cards.filter(c => c.tcgdex_id);
+  const total = queue.length;
+  if (!total) return;
+  btn.disabled = true;
+  let done = 0;
+  const worker = async () => {
+    while (queue.length) {
+      const c = queue.shift();
+      try {
+        const t = await tcg(`${c.language.toLowerCase()}/cards/${encodeURIComponent(c.tcgdex_id)}`);
+        await saveSnapshot(c, t);
+      } catch (e) { /* einzelne Fehler überspringen */ }
+      done++;
+      btn.textContent = `${done} von ${total}`;
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  await loadMain();
+}
+
+/* ---------- Bottom Sheet ---------- */
+
+function openSheet(html) {
+  closeSheet();
+  const el = document.createElement("div");
+  el.className = "backdrop";
+  el.id = "sheet";
+  el.innerHTML = `<section class="sheet" role="dialog" aria-modal="true">${html}</section>`;
+  el.addEventListener("click", e => { if (e.target === el) closeSheet(); });
+  document.body.appendChild(el);
+  document.body.classList.add("lock");
+  const sheet = el.firstElementChild;
+  sheet.querySelectorAll("[data-close]").forEach(b => b.onclick = closeSheet);
+  return sheet;
+}
+
+function closeSheet() {
+  const el = $("#sheet");
+  if (el) el.remove();
+  document.body.classList.remove("lock");
+}
+
+/* ---------- Karte hinzufügen ---------- */
+
+function openAdd() {
+  const s = { lang: "DE", picked: null };
+  const sheet = openSheet(`
+    <header class="sheet-head"><h2>Karte hinzufügen</h2><button class="ghost" data-close>Schließen</button></header>
+    <div class="seg" id="langseg"><button data-l="DE" class="on">Deutsch</button><button data-l="EN">Englisch</button></div>
+    <div class="searchrow">
+      <input id="q" type="search" placeholder="Kartenname, z. B. Mewtu" enterkeyhint="search" autocomplete="off">
+      <button id="sbtn" class="primary">Suchen</button>
+    </div>
+    <div id="res"></div>`);
+
+  const res = $("#res", sheet);
+
+  sheet.querySelectorAll("#langseg button").forEach(b => b.onclick = () => {
+    s.lang = b.dataset.l;
+    sheet.querySelectorAll("#langseg button").forEach(x => x.classList.toggle("on", x === b));
+    res.innerHTML = "";
+    s.picked = null;
+  });
+
+  async function search() {
+    const q = $("#q", sheet).value.trim();
+    if (q.length < 2) return;
+    res.innerHTML = `<p class="muted">Suche läuft …</p>`;
+    try {
+      const list = await tcg(`${s.lang.toLowerCase()}/cards?name=${encodeURIComponent(q)}&pagination:page=1&pagination:itemsPerPage=40`);
+      if (!list.length) {
+        res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen oder die andere Sprache.</p>`;
+        return;
+      }
+      res.innerHTML = `<ul class="results">${list.map(c => `<li><button class="pick" data-id="${esc(c.id)}">
+        ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="noimg"></span>`}
+        <span><b>${esc(c.name)}</b><small>${esc(c.id)}</small></span></button></li>`).join("")}</ul>`;
+      res.querySelectorAll(".pick").forEach(b => b.onclick = () => pick(b.dataset.id));
+    } catch (e) {
+      res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
+    }
+  }
+
+  async function pick(id) {
+    res.innerHTML = `<p class="muted">Karte wird geladen …</p>`;
+    try {
+      const c = await tcg(`${s.lang.toLowerCase()}/cards/${encodeURIComponent(id)}`);
+      s.picked = c;
+      const v = c.variants || {};
+      const foilOnly = !v.normal && (v.holo || v.reverse);
+      const m = c.pricing && c.pricing.cardmarket;
+      const priceText = m && typeof m.trend === "number"
+        ? `Trend ${eur(m.trend)}${typeof m["trend-holo"] === "number" ? `, Foil ${eur(m["trend-holo"])}` : ""}`
+        : (m && typeof m["trend-holo"] === "number" ? `Foil-Trend ${eur(m["trend-holo"])}` : "Kein Cardmarket-Preis vorhanden");
+      res.innerHTML = `
+        <div class="preview">
+          ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="">` : ""}
+          <div>
+            <h3>${esc(c.name)}</h3>
+            <p class="muted">${esc(c.set && c.set.name || "")}, Nr. ${esc(c.localId)}</p>
+            <p class="muted">${esc(c.rarity || "")}</p>
+            <p>${esc(priceText)}</p>
+          </div>
+        </div>
+        <label>Zustand<select id="cond">${condOptions("NM")}</select></label>
+        <label>Menge<input id="qty" type="number" min="1" value="1" inputmode="numeric"></label>
+        <label class="check"><input id="foil" type="checkbox"${foilOnly ? " checked" : ""}> Holo oder Reverse Holo (Foil-Preis verwenden)</label>
+        <label>Kaufpreis pro Karte in EUR (optional)<input id="pp" type="number" min="0" step="0.01" inputmode="decimal"></label>
+        <button id="save" class="primary wide">Zur Sammlung hinzufügen</button>
+        <p class="err" id="saveerr"></p>`;
+      $("#save", sheet).onclick = save;
+    } catch (e) {
+      res.innerHTML = `<p class="err">Karte konnte nicht geladen werden: ${esc(e.message)}</p>`;
+    }
+  }
+
+  async function save() {
+    const c = s.picked;
+    const btn = $("#save", sheet);
+    btn.disabled = true;
+    const pp = $("#pp", sheet).value;
+    const row = {
+      name: c.name,
+      set_name: (c.set && c.set.name) || null,
+      card_number: String(c.localId),
+      language: s.lang,
+      condition: $("#cond", sheet).value,
+      quantity: Math.max(1, parseInt($("#qty", sheet).value, 10) || 1),
+      purchase_price_eur: pp === "" ? null : Number(pp),
+      tcgdex_id: c.id,
+      image_url: c.image ? `${c.image}/low.webp` : null,
+      foil: $("#foil", sheet).checked
+    };
+    const { data, error } = await db.from("cards").insert(row).select().single();
+    if (error) {
+      $("#saveerr", sheet).textContent = "Speichern fehlgeschlagen: " + error.message;
+      btn.disabled = false;
+      return;
+    }
+    await saveSnapshot(data, c);
+    closeSheet();
+    await loadMain();
+  }
+
+  $("#sbtn", sheet).onclick = search;
+  $("#q", sheet).addEventListener("keydown", e => { if (e.key === "Enter") search(); });
+  $("#q", sheet).focus();
+}
+
+/* ---------- Kartendetails ---------- */
+
+function priceLines(p) {
+  const out = [];
+  for (const k of ["cm_trend", "cm_lang_floor", "ebay_sold"]) {
+    const r = p[k];
+    if (!r) continue;
+    let extra = "";
+    if (k === "cm_trend" && r.details) {
+      const bits = [];
+      if (r.details.avg7 != null) bits.push(`Ø 7 Tage ${eur(r.details.avg7)}`);
+      if (r.details.avg30 != null) bits.push(`Ø 30 Tage ${eur(r.details.avg30)}`);
+      extra = bits.join(", ");
+    }
+    out.push(`<li><span>${SRC[k]}</span><b>${eur(Number(r.price_eur))}</b><small>${extra ? esc(extra) + ", " : ""}Stand ${fmtDate(r.captured_on)}</small></li>`);
+  }
+  return out.length ? `<ul class="plines">${out.join("")}</ul>` : `<p class="muted">Noch kein Preis gespeichert.</p>`;
+}
+
+function chart(points) {
+  if (points.length < 2) return `<p class="muted">Der Verlauf entsteht ab dem zweiten Tag mit Preisdaten.</p>`;
+  const W = 320, H = 110, pad = 6;
+  const ys = points.map(p => Number(p.price_eur));
+  const min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
+  const x = i => pad + (i / (points.length - 1)) * (W - 2 * pad);
+  const y = v => H - pad - ((v - min) / span) * (H - 2 * pad);
+  const d = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(Number(p.price_eur)).toFixed(1)}`).join(" ");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Preisverlauf des Cardmarket-Trends"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>
+    <div class="range"><span>${eur(min)}</span><span>${fmtDate(points[0].captured_on)} bis ${fmtDate(points[points.length - 1].captured_on)}</span><span>${eur(max)}</span></div>`;
+}
+
+async function openDetail(id) {
+  const c = state.cards.find(x => x.id === id);
+  if (!c) return;
+  const p = state.latest[id] || {};
+  const sheet = openSheet(`
+    <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
+    <p class="muted">${esc(c.set_name || "")}${c.card_number ? ", Nr. " + esc(c.card_number) : ""}, ${esc(c.language)}${c.foil ? ", Foil" : ""}</p>
+    <div class="hist" id="hist"><p class="muted">Verlauf wird geladen …</p></div>
+    ${priceLines(p)}
+    ${c.purchase_price_eur != null ? `<p class="muted">Kaufpreis ${eur(Number(c.purchase_price_eur))} pro Karte</p>` : ""}
+    <label>Zustand<select id="cond">${condOptions(c.condition)}</select></label>
+    <label>Menge<input id="qty" type="number" min="1" value="${c.quantity}" inputmode="numeric"></label>
+    <button id="upd" class="primary wide">Änderungen speichern</button>
+    <button id="del" class="danger wide">Karte löschen</button>
+    <p class="err" id="derr"></p>`);
+
+  $("#upd", sheet).onclick = async () => {
+    const { error } = await db.from("cards").update({
+      condition: $("#cond", sheet).value,
+      quantity: Math.max(1, parseInt($("#qty", sheet).value, 10) || 1)
+    }).eq("id", id);
+    if (error) { $("#derr", sheet).textContent = "Speichern fehlgeschlagen: " + error.message; return; }
+    closeSheet();
+    await loadMain();
+  };
+
+  $("#del", sheet).onclick = async () => {
+    if (!confirm("Karte wirklich löschen? Der Preisverlauf wird mit gelöscht.")) return;
+    const { error } = await db.from("cards").delete().eq("id", id);
+    if (error) { $("#derr", sheet).textContent = "Löschen fehlgeschlagen: " + error.message; return; }
+    closeSheet();
+    await loadMain();
+  };
+
+  const { data, error } = await db.from("price_snapshots")
+    .select("captured_on,price_eur")
+    .eq("card_id", id).eq("source", "cm_trend")
+    .order("captured_on", { ascending: true }).limit(365);
+  const hist = $("#hist", sheet);
+  if (hist) hist.innerHTML = error ? `<p class="err">Verlauf konnte nicht geladen werden.</p>` : chart(data);
+}
+
+/* ---------- Start ---------- */
+
+let uid = null;
+db.auth.onAuthStateChange((event, session) => {
+  const id = session && session.user ? session.user.id : null;
+  if (id === uid && event !== "INITIAL_SESSION") return;
+  uid = id;
+  setTimeout(() => { id ? loadMain() : renderLogin(); }, 0);
+});
+})();
+</script>
+</body>
+</html>
