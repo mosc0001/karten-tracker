@@ -103,6 +103,17 @@ const SRC = {
 };
 
 const state = { cards: [], latest: {} };
+const triedImages = new Set();
+
+// Lädt ein deutsches Bild nicht, wird die englische Version derselben Karte versucht.
+window.imgFallback = img => {
+  if (!img.dataset.fb && img.src.includes("/de/")) {
+    img.dataset.fb = "1";
+    img.src = img.src.replace("/de/", "/en/");
+  } else {
+    img.style.visibility = "hidden";
+  }
+};
 
 const condOptions = sel => CONDITIONS.map(([v, l]) => `<option value="${v}"${v === sel ? " selected" : ""}>${l} (${v})</option>`).join("");
 
@@ -110,6 +121,30 @@ async function tcg(path) {
   const res = await fetch(`${TCGDEX}/${path}`);
   if (!res.ok) throw new Error(`TCGdex antwortet mit Status ${res.status}`);
   return res.json();
+}
+
+async function imageFor(id, lang, own) {
+  if (own) return `${own}/low.webp`;
+  if (lang !== "EN") {
+    try {
+      const en = await tcg(`en/cards/${encodeURIComponent(id)}`);
+      if (en.image) return `${en.image}/low.webp`;
+    } catch (e) { /* kein Ersatzbild verfügbar */ }
+  }
+  return null;
+}
+
+async function repairImages() {
+  const todo = state.cards.filter(c => !c.image_url && c.tcgdex_id && !triedImages.has(c.id));
+  let changed = false;
+  for (const c of todo) {
+    triedImages.add(c.id);
+    const url = await imageFor(c.tcgdex_id, c.language, null);
+    if (!url) continue;
+    const { error } = await db.from("cards").update({ image_url: url }).eq("id", c.id);
+    if (!error) { c.image_url = url; changed = true; }
+  }
+  if (changed) renderMain();
 }
 
 function trendOf(tcgCard, foil) {
@@ -178,6 +213,7 @@ async function loadMain() {
     state.latest[r.card_id][r.source] = r;
   }
   renderMain();
+  repairImages();
 }
 
 function extraLines(p) {
@@ -203,7 +239,7 @@ function renderMain() {
   const list = rows.length ? `<ul class="list" id="list">${rows.map(({ c, p, unit, total }) => {
     const extra = extraLines(p);
     return `<li><button class="row" data-id="${esc(c.id)}">
-      ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="thumb"></span>`}
+      ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" onerror="imgFallback(this)">` : `<span class="thumb"></span>`}
       <span>
         <span class="name">${esc(c.name)}</span>
         <span class="meta"><span>${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
@@ -227,7 +263,7 @@ function renderMain() {
       </header>
       <section class="sleeve">
         <p class="total">${eur(sum)}</p>
-        <p class="sub">${qty} Karten${last ? ", Preisstand " + fmtDate(last) : ""}</p>
+        <p class="sub">${qty} ${qty === 1 ? "Karte" : "Karten"}${last ? ", Preisstand " + fmtDate(last) : ""}</p>
         ${missing ? `<p class="sub">${missing} Einträge ohne Preis</p>` : ""}
       </section>
       ${list}
@@ -322,7 +358,7 @@ function openAdd() {
         return;
       }
       res.innerHTML = `<ul class="results">${list.map(c => `<li><button class="pick" data-id="${esc(c.id)}">
-        ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="noimg"></span>`}
+        ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="imgFallback(this)">` : `<span class="noimg"></span>`}
         <span><b>${esc(c.name)}</b><small>${esc(c.id)}</small></span></button></li>`).join("")}</ul>`;
       res.querySelectorAll(".pick").forEach(b => b.onclick = () => pick(b.dataset.id));
     } catch (e) {
@@ -335,6 +371,7 @@ function openAdd() {
     try {
       const c = await tcg(`${s.lang.toLowerCase()}/cards/${encodeURIComponent(id)}`);
       s.picked = c;
+      s.imageUrl = await imageFor(c.id, s.lang, c.image);
       const v = c.variants || {};
       const foilOnly = !v.normal && (v.holo || v.reverse);
       const m = c.pricing && c.pricing.cardmarket;
@@ -343,7 +380,7 @@ function openAdd() {
         : (m && typeof m["trend-holo"] === "number" ? `Foil-Trend ${eur(m["trend-holo"])}` : "Kein Cardmarket-Preis vorhanden");
       res.innerHTML = `
         <div class="preview">
-          ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="">` : ""}
+          ${s.imageUrl ? `<img src="${esc(s.imageUrl)}" alt="" onerror="imgFallback(this)">` : ""}
           <div>
             <h3>${esc(c.name)}</h3>
             <p class="muted">${esc(c.set && c.set.name || "")}, Nr. ${esc(c.localId)}</p>
@@ -377,7 +414,7 @@ function openAdd() {
       quantity: Math.max(1, parseInt($("#qty", sheet).value, 10) || 1),
       purchase_price_eur: pp === "" ? null : Number(pp),
       tcgdex_id: c.id,
-      image_url: c.image ? `${c.image}/low.webp` : null,
+      image_url: s.imageUrl,
       foil: $("#foil", sheet).checked
     };
     const { data, error } = await db.from("cards").insert(row).select().single();
