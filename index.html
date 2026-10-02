@@ -148,6 +148,9 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .drow dt{color:var(--muted)}
 .drow dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .dnote{margin:6px 0 0;color:var(--muted);font-size:.78rem}
+.dsec h4{font-size:.85rem;margin:14px 0 2px;color:var(--muted);font-weight:600}
+.drow small{color:var(--muted);font-size:.78rem}
+.drow.mine dt{color:var(--ink);font-weight:600}
 .dsec{margin-top:22px}
 .dsec h3{font-size:.95rem;margin-bottom:6px}
 .dsec .hist{margin:0}
@@ -241,27 +244,42 @@ async function repairImages() {
   if (changed) renderMain();
 }
 
-function trendOf(tcgCard, foil) {
+// Welche Cardmarket-Felder gelten für eine Karte?
+// Holo-Felder ("-holo") nur, wenn die Karte als Foil markiert ist UND es sie auch ohne Holo gibt.
+// Reine Holo-Karten (z. B. Shining Kabutops) haben ihren Preis in den normalen Feldern.
+function priceFields(tcgCard, foil) {
   const m = tcgCard && tcgCard.pricing && tcgCard.pricing.cardmarket;
   if (!m) return null;
-  const v = foil ? m["trend-holo"] : m.trend;
-  return typeof v === "number" ? v : null;
+  const v = tcgCard.variants;
+  const plainExists = v && typeof v === "object" ? v.normal === true : true;
+  const num = k => typeof m[k] === "number";
+  let suffix = foil && plainExists ? "-holo" : "";
+  if (!num("trend" + suffix)) {
+    const alt = suffix ? "" : "-holo";
+    if (!num("trend" + alt)) return null;
+    suffix = alt;
+  }
+  return { m, suffix, trend: m["trend" + suffix], plainExists };
+}
+
+function trendOf(tcgCard, foil) {
+  const f = priceFields(tcgCard, foil);
+  return f ? f.trend : null;
 }
 
 async function saveSnapshot(card, tcgCard) {
-  const v = trendOf(tcgCard, card.foil);
-  if (v == null) return false;
-  const m = tcgCard.pricing.cardmarket;
-  const s = card.foil ? "-holo" : "";
+  const f = priceFields(tcgCard, card.foil);
+  if (!f) return false;
+  const { m, suffix } = f;
   const details = {
-    avg7: m["avg7" + s] ?? null,
-    avg30: m["avg30" + s] ?? null,
-    low: m["low" + s] ?? null,
-    finish: card.foil ? "foil" : "normal",
+    avg7: m["avg7" + suffix] ?? null,
+    avg30: m["avg30" + suffix] ?? null,
+    low: m["low" + suffix] ?? null,
+    finish: suffix ? "foil" : "normal",
     updated: m.updated ?? null
   };
   const { error } = await db.from("price_snapshots").upsert(
-    { card_id: card.id, captured_on: today(), source: "cm_trend", price_eur: v, details },
+    { card_id: card.id, captured_on: today(), source: "cm_trend", price_eur: f.trend, details },
     { onConflict: "card_id,captured_on,source" }
   );
   return !error;
@@ -627,7 +645,7 @@ function renderMain() {
       </section>
       ${filters}
       <div id="listwrap"></div>
-      <p class="note">Wert = Cardmarket-Trend über alle Sprachen (Quelle: TCGdex). Ø30 = Abweichung des aktuellen Trends vom 30-Tage-Durchschnitt. Deutsche Karten werden oft günstiger gehandelt, der Zustand fließt in den Preis noch nicht ein.</p>
+      <p class="note">Wert = Cardmarket-Trend über alle Sprachen (Quelle: TCGdex). Ø30 = Abweichung des aktuellen Trends vom 30-Tage-Durchschnitt. Reine Holo-Karten nutzen den normalen Trend, Foil-Karten mit Nicht-Holo-Version den Holo-Trend. Deutsche Karten werden oft günstiger gehandelt, der Zustand fließt in den Preis noch nicht ein.</p>
     </div>
     <button id="add" class="primary fab">Karte hinzufügen</button>`;
 
@@ -796,6 +814,71 @@ function closeSheet() {
 
 /* ---------- Karte hinzufügen ---------- */
 
+const cardCache = {};
+function liveCard(lang, id) {
+  const k = lang + "/" + id;
+  if (!cardCache[k]) cardCache[k] = tcg(`${lang}/cards/${encodeURIComponent(id)}`).catch(e => { delete cardCache[k]; throw e; });
+  return cardCache[k];
+}
+
+const usd = n => (n == null || Number.isNaN(n)) ? "–" : new Intl.NumberFormat("de-DE", { style: "currency", currency: "USD" }).format(n);
+const TP_LABELS = [
+  ["1st-edition-holofoil", "1st Edition Holo"], ["1st-edition", "1st Edition"],
+  ["unlimited-holofoil", "Unlimited Holo"], ["unlimited", "Unlimited"],
+  ["holofoil", "Holo"], ["reverse-holofoil", "Reverse Holo"], ["normal", "Normal"]
+];
+
+async function renderLive(sheet, c) {
+  const box = $("#live", sheet);
+  if (!box) return;
+  if (!c.tcgdex_id) { box.innerHTML = `<p class="muted">Keine Kartenkennung gespeichert.</p>`; return; }
+  try {
+    const own = await liveCard(c.language.toLowerCase(), c.tcgdex_id);
+    let en = own;
+    if (c.language !== "EN") { try { en = await liveCard("en", c.tcgdex_id); } catch (e) { en = own; } }
+    if (!$("#live", sheet)) return;
+
+    // Cardmarket (EUR)
+    const m = own.pricing && own.pricing.cardmarket;
+    const f = priceFields(own, c.foil);
+    const std = m && typeof m.trend === "number" ? m.trend : null;
+    const holo = m && typeof m["trend-holo"] === "number" ? m["trend-holo"] : null;
+    const why = !f ? "" : f.suffix
+      ? (c.foil ? "Foil-Karte mit Nicht-Holo-Version: Es gilt der Holo-Trend." : "Der normale Trend ist nicht verfügbar, deshalb gilt der Holo-Trend.")
+      : (c.foil && !f.plainExists ? "Diese Karte gibt es nur als Holo: Es gilt der normale Trend." : "Es gilt der normale Trend.");
+    const cmRows = [
+      std != null ? `<div class="drow${f && !f.suffix ? " mine" : ""}"><dt>Normaler Trend</dt><dd>${eur(std)}</dd></div>` : "",
+      holo != null ? `<div class="drow${f && f.suffix ? " mine" : ""}"><dt>Holo-Trend</dt><dd>${eur(holo)}</dd></div>` : ""
+    ].join("");
+
+    // TCGplayer (USD), englische Karte
+    const tp = (en.pricing && en.pricing.tcgplayer) || (own.pricing && own.pricing.tcgplayer) || null;
+    let tpRows = [];
+    if (tp) {
+      const known = TP_LABELS.map(([k]) => k);
+      const keys = [...TP_LABELS.filter(([k]) => tp[k] && typeof tp[k] === "object").map(([k, l]) => [k, l]),
+        ...Object.keys(tp).filter(k => !known.includes(k) && tp[k] && typeof tp[k] === "object").map(k => [k, k])];
+      const isFirst = k => k.startsWith("1st-edition");
+      keys.sort((a, b) => (c.first_edition ? Number(!isFirst(a[0])) - Number(!isFirst(b[0])) : Number(isFirst(a[0])) - Number(isFirst(b[0]))));
+      tpRows = keys.map(([k, label]) => {
+        const v = tp[k];
+        if (v.marketPrice == null && v.lowPrice == null) return "";
+        return `<div class="drow"><dt>${esc(label)}</dt><dd>${usd(v.marketPrice)}${v.lowPrice != null ? ` <small>ab ${usd(v.lowPrice)}</small>` : ""}</dd></div>`;
+      }).filter(Boolean);
+    }
+    box.innerHTML = `
+      <h4>Cardmarket, Euro</h4>
+      ${cmRows ? `<dl class="dstats">${cmRows}</dl><p class="dnote">${esc(why)} Der Cardmarket-Trend gilt für das Produkt und ist nach bisherigem Stand nicht nach Edition getrennt.</p>` : `<p class="muted dsmall">Kein Cardmarket-Preis vorhanden.</p>`}
+      <h4>TCGplayer, US-Dollar</h4>
+      ${tpRows.length
+        ? `<dl class="dstats">${tpRows.join("")}</dl><p class="dnote">US-Markt, Daten der englischen Karte${c.language !== "EN" ? " (deine Karte ist " + (c.language === "DE" ? "deutsch" : esc(c.language)) + ")" : ""}. Marktpreis, daneben der niedrigste Angebotspreis.${c.first_edition ? " Die 1st-Edition-Zeilen stehen oben, weil du die Karte so markiert hast." : ""}</p>`
+        : `<p class="muted dsmall">Für diese Karte liegen bei TCGplayer keine Preise vor.</p>`}`;
+  } catch (e) {
+    const b = $("#live", sheet);
+    if (b) b.innerHTML = `<p class="muted dsmall">Die Preise nach Ausführung konnten nicht geladen werden.</p>`;
+  }
+}
+
 const setsCache = {};
 function setsFor(lang) {
   if (!setsCache[lang]) setsCache[lang] = tcg(`${lang}/sets`).catch(e => { delete setsCache[lang]; throw e; });
@@ -907,8 +990,8 @@ function openAdd() {
       const foilOnly = !v.normal && (v.holo || v.reverse);
       const m = c.pricing && c.pricing.cardmarket;
       const priceText = m && typeof m.trend === "number"
-        ? `Trend ${eur(m.trend)}${typeof m["trend-holo"] === "number" ? `, Foil ${eur(m["trend-holo"])}` : ""}`
-        : (m && typeof m["trend-holo"] === "number" ? `Foil-Trend ${eur(m["trend-holo"])}` : "Kein Cardmarket-Preis vorhanden");
+        ? `Cardmarket-Trend ${eur(m.trend)}${typeof m["trend-holo"] === "number" ? `, Holo-Feld ${eur(m["trend-holo"])}` : ""}`
+        : (m && typeof m["trend-holo"] === "number" ? `Cardmarket-Holo-Trend ${eur(m["trend-holo"])}` : "Kein Cardmarket-Preis vorhanden");
       const sid = c.set && c.set.id;
       const year = sid && state.setYears[sid] ? ` (${state.setYears[sid]})` : "";
       res.innerHTML = `
@@ -924,11 +1007,21 @@ function openAdd() {
         </div>
         <label>Zustand<select id="cond">${condOptions("NM")}</select></label>
         <label>Menge<input id="qty" type="number" min="1" value="1" inputmode="numeric"></label>
-        <label class="check"><input id="foil" type="checkbox"${foilOnly ? " checked" : ""}> Holo oder Reverse Holo (Foil-Preis verwenden)</label>
+        <label class="check"><input id="foil" type="checkbox"${foilOnly ? " checked" : ""}> <span>Holo oder Reverse Holo<br><small class="muted">Gibt es die Karte auch ohne Holo, gilt der Foil-Preis. Reine Holo-Karten nutzen den normalen Cardmarket-Trend.</small></span></label>
+        <p class="muted dsmall" id="pline"></p>
         <label class="check"><input id="first" type="checkbox"> <span>1st Edition${v.firstEdition ? " (für diese Karte ist ein 1st-Edition-Druck bekannt)" : ""}<br><small class="muted">Nur eine Markierung, der Preis ändert sich dadurch nicht.</small></span></label>
         <label>Kaufpreis pro Karte in EUR (optional)<input id="pp" type="number" min="0" step="0.01" inputmode="decimal"></label>
         <button id="save" class="primary wide">Zur Sammlung hinzufügen</button>
         <p class="err" id="saveerr"></p>`;
+      const showUsed = () => {
+        const f = priceFields(c, $("#foil", sheet).checked);
+        const pl = $("#pline", sheet);
+        if (pl) pl.textContent = f
+          ? `Verwendeter Preis: ${eur(f.trend)} (${f.suffix ? "Holo-Feld" : "normaler Trend"})`
+          : "Verwendeter Preis: keiner verfügbar";
+      };
+      $("#foil", sheet).onchange = showUsed;
+      showUsed();
       $("#save", sheet).onclick = save;
       const back = $("#back", sheet);
       if (back) back.onclick = () => showResults(s.results);
@@ -1032,6 +1125,10 @@ async function openDetail(id) {
       <div class="hist" id="hist"><p class="muted">Verlauf wird geladen …</p></div>
     </section>
     <section class="dsec">
+      <h3>Preise nach Ausführung</h3>
+      <div id="live"><p class="muted dsmall">Wird geladen …</p></div>
+    </section>
+    <section class="dsec">
       <h3>Bearbeiten</h3>
       <div class="dform">
         <label class="fcond">Zustand<select id="cond">${condOptions(c.condition)}</select></label>
@@ -1045,6 +1142,8 @@ async function openDetail(id) {
       </div>
       <p class="err" id="derr"></p>
     </section>`);
+
+  renderLive(sheet, c);
 
   $("#upd", sheet).onclick = async () => {
     const ppv = $("#pp", sheet).value;
