@@ -40,6 +40,23 @@ async function tcgCard(lang, id) {
   }
 }
 
+// Gleiche Regel wie in der App: Holo-Felder ("-holo") nur bei Foil-Karten, die es auch ohne Holo gibt.
+// Reine Holo-Karten haben ihren Preis in den normalen Feldern.
+function priceFields(t, foil) {
+  const m = t && t.pricing && t.pricing.cardmarket;
+  if (!m) return null;
+  const v = t.variants;
+  const plainExists = v && typeof v === "object" ? v.normal === true : true;
+  const num = (k) => typeof m[k] === "number";
+  let suffix = foil && plainExists ? "-holo" : "";
+  if (!num("trend" + suffix)) {
+    const alt = suffix ? "" : "-holo";
+    if (!num("trend" + alt)) return null;
+    suffix = alt;
+  }
+  return { m, suffix };
+}
+
 const cards = await sb("cards?select=id,language,tcgdex_id,foil&tcgdex_id=not.is.null");
 console.log(`${cards.length} Karten gefunden.`);
 
@@ -53,13 +70,13 @@ async function worker() {
     const c = queue.shift();
     try {
       const t = await tcgCard(c.language.toLowerCase(), c.tcgdex_id);
-      const m = t && t.pricing && t.pricing.cardmarket;
-      const s = c.foil ? "-holo" : "";
-      const trend = m ? m["trend" + s] : undefined;
-      if (typeof trend !== "number") {
+      const f = priceFields(t, c.foil);
+      if (!f) {
         noPrice++;
         continue;
       }
+      const { m, suffix: s } = f;
+      const trend = m["trend" + s];
       rows.push({
         card_id: c.id,
         captured_on: today,
@@ -69,7 +86,7 @@ async function worker() {
           avg7: m["avg7" + s] ?? null,
           avg30: m["avg30" + s] ?? null,
           low: m["low" + s] ?? null,
-          finish: c.foil ? "foil" : "normal",
+          finish: s ? "foil" : "normal",
           updated: m.updated ?? null,
         },
       });
