@@ -69,7 +69,7 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .preview img{width:96px;height:auto;border-radius:6px;align-self:flex-start}
 .preview p{margin:2px 0}
 .hist{margin:12px 0}
-.hist svg{width:100%;height:auto;display:block}
+.hist svg{width:100%;height:120px;display:block}
 .range{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:.78rem;white-space:nowrap}
 .filters{display:grid;gap:8px;margin:0 0 8px}
 .filters input,.filters select{margin-top:0}
@@ -109,7 +109,7 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .sleeve{display:grid;gap:12px}
 .sleeve .linkish{justify-self:start}
 @media (min-width:760px){.sleeve{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);align-items:center;gap:24px}}
-.spark svg{width:100%;height:auto;display:block}
+.spark svg{width:100%;height:100px;display:block}
 .spark .sub{margin:0}
 .up{color:var(--up)}
 .down{color:var(--down)}
@@ -132,7 +132,29 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .tile .meta{margin-top:0}
 .tprice{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 6px;font-variant-numeric:tabular-nums}
 .okmsg{margin:8px 0;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--line)}
-.dchg{margin:6px 0 0;font-size:.9rem;color:var(--muted)}
+.dtop{display:grid;grid-template-columns:minmax(120px,40%) minmax(0,1fr);grid-template-areas:"art info" "stats stats";gap:14px 16px;align-items:start;margin-top:4px}
+@media (min-width:600px){.dtop{grid-template-columns:240px minmax(0,1fr);grid-template-areas:"art info" "art stats";gap:10px 24px;align-content:start}}
+.dart{grid-area:art;aspect-ratio:63/88;border-radius:10px;background:var(--line);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.dart img{width:100%;height:100%;object-fit:contain}
+.dinfo{grid-area:info;display:flex;flex-direction:column;gap:6px;min-width:0}
+.dinfo p{margin:0}
+.dprice{font-size:clamp(1.6rem,6vw,2.2rem);font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:6px!important}
+.dsmall{font-size:.85rem}
+.dstatswrap{grid-area:stats;min-width:0}
+.dstats{margin:0}
+.drow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:.9rem}
+.drow dt{color:var(--muted)}
+.drow dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.dnote{margin:6px 0 0;color:var(--muted);font-size:.78rem}
+.dsec{margin-top:22px}
+.dsec h3{font-size:.95rem;margin-bottom:6px}
+.dsec .hist{margin:0}
+.dform{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dform label{margin-top:0}
+.fcond{grid-column:1/-1}
+@media (min-width:600px){.dform{grid-template-columns:1.4fr .7fr 1fr}.fcond{grid-column:auto}}
+.dactions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+.dangerlink{background:none;border:0;padding:8px 0;color:var(--danger);text-decoration:underline;text-underline-offset:2px}
 .plines{list-style:none;padding:0;margin:12px 0 0}
 .plines li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:8px 0;border-bottom:1px solid var(--line)}
 .plines small{grid-column:1/-1;color:var(--muted)}
@@ -171,6 +193,11 @@ try { state.setYears = JSON.parse(localStorage.getItem(YEAR_KEY) || "{}") || {};
 try { state.view = localStorage.getItem("kt_view") === "grid" ? "grid" : "list"; } catch (e) { /* Standard: Liste */ }
 
 // Lädt ein deutsches Bild nicht, wird die englische Version derselben Karte versucht.
+window.detailImgFallback = img => {
+  if (img.src.includes("/high.")) { img.src = img.src.replace("/high.", "/low."); return; }
+  window.imgFallback(img);
+};
+
 window.imgFallback = img => {
   if (!img.dataset.fb && img.src.includes("/de/")) {
     img.dataset.fb = "1";
@@ -477,7 +504,7 @@ function lineChart(points, getV, aria) {
   const x = i => pad + (i / (points.length - 1)) * (W - 2 * pad);
   const y = v => H - pad - ((v - min) / span) * (H - 2 * pad);
   const d = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(getV(p)).toFixed(1)}`).join(" ");
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(aria)}"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>
     <div class="range"><span>${eur(min)}</span><span>${fmtRange(points[0].captured_on, points[points.length - 1].captured_on)}</span><span>${eur(max)}</span></div>`;
 }
 
@@ -945,23 +972,6 @@ function openAdd() {
 
 /* ---------- Kartendetails ---------- */
 
-function priceLines(p) {
-  const out = [];
-  for (const k of ["cm_trend", "cm_lang_floor", "ebay_sold"]) {
-    const r = p[k];
-    if (!r) continue;
-    let extra = "";
-    if (k === "cm_trend" && r.details) {
-      const bits = [];
-      if (r.details.avg7 != null) bits.push(`Ø 7 Tage ${eur(r.details.avg7)}`);
-      if (r.details.avg30 != null) bits.push(`Ø 30 Tage ${eur(r.details.avg30)}`);
-      extra = bits.join(", ");
-    }
-    out.push(`<li><span>${SRC[k]}</span><b>${eur(Number(r.price_eur))}</b><small>${extra ? esc(extra) + ", " : ""}Stand ${fmtDate(r.captured_on)}</small></li>`);
-  }
-  return out.length ? `<ul class="plines">${out.join("")}</ul>` : `<p class="muted">Noch kein Preis gespeichert.</p>`;
-}
-
 function chart(points) {
   if (points.length < 2) return `<p class="muted">Der Verlauf entsteht ab dem zweiten Tag mit Preisdaten.</p>`;
   return lineChart(points, p => Number(p.price_eur), "Preisverlauf des Cardmarket-Trends");
@@ -971,29 +981,62 @@ async function openDetail(id) {
   const c = state.cards.find(x => x.id === id);
   if (!c) return;
   const p = state.latest[id] || {};
+  const r = p.cm_trend;
+  const unit = r ? Number(r.price_eur) : null;
   const ci = changeInfo(p);
-  const unit = p.cm_trend ? Number(p.cm_trend.price_eur) : null;
   const pp = c.purchase_price_eur != null ? Number(c.purchase_price_eur) : null;
-  const chgLine = ci && (ci.d7 != null || ci.d30 != null)
-    ? `<p class="dchg">Trend gegenüber Durchschnitt: ${[
-        ci.d7 != null ? `7 Tage <span class="${trendCls(ci.d7)}">${fmtPct(ci.d7)}</span>` : "",
-        ci.d30 != null ? `30 Tage <span class="${trendCls(ci.d30)}">${fmtPct(ci.d30)}</span>` : ""
-      ].filter(Boolean).join(", ")}</p>` : "";
-  const gainLine = pp != null && unit != null
-    ? `<p class="dchg">Gewinn/Verlust zum Kaufpreis (${eur(pp)} pro Karte): <span class="${trendCls(unit - pp)}">${signedEur((unit - pp) * c.quantity)}${pp > 0 ? ` (${fmtPct((unit - pp) / pp * 100)})` : ""}</span></p>` : "";
+  const year = c.set_name ? setYear(c.set_name) : "";
+  const big = c.image_url ? c.image_url.replace(/\/low\.(webp|png|jpg)$/, "/high.$1") : null;
+
+  const row = (label, value) => `<div class="drow"><dt>${label}</dt><dd>${value}</dd></div>`;
+  const pct = v => (v == null ? "" : ` <span class="${trendCls(v)}">(${fmtPct(v)})</span>`);
+  const stats = [];
+  if (r && r.details && r.details.avg7 != null) stats.push(row("Ø 7 Tage", eur(Number(r.details.avg7)) + pct(ci && ci.d7)));
+  if (r && r.details && r.details.avg30 != null) stats.push(row("Ø 30 Tage", eur(Number(r.details.avg30)) + pct(ci && ci.d30)));
+  if (p.cm_lang_floor) stats.push(row(SRC.cm_lang_floor, eur(Number(p.cm_lang_floor.price_eur))));
+  if (p.ebay_sold) stats.push(row(SRC.ebay_sold, eur(Number(p.ebay_sold.price_eur))));
+  if (pp != null) stats.push(row("Kaufpreis pro Karte", eur(pp)));
+  if (pp != null && unit != null) {
+    const g = (unit - pp) * c.quantity;
+    stats.push(row("Gewinn/Verlust", `<span class="${trendCls(g)}">${signedEur(g)}${pp > 0 ? ` (${fmtPct((unit - pp) / pp * 100)})` : ""}</span>`));
+  }
+  const hasPct = ci && (ci.d7 != null || ci.d30 != null);
+
+  const priceBlock = unit == null
+    ? `<p class="dprice">Kein Preis</p><p class="muted dsmall">Für diese Karte liegt noch kein Cardmarket-Preis vor.</p>`
+    : `<p class="dprice">${eur(unit * c.quantity)}</p>
+       <p class="muted dsmall">${c.quantity > 1 ? `${c.quantity} × ${eur(unit)}, ` : ""}Cardmarket-Trend (alle Sprachen), Stand ${fmtDate(r.captured_on)}</p>`;
+
   const sheet = openSheet(`
     <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
-    <p class="muted">${esc(c.set_name || "")}${c.set_name && setYear(c.set_name) ? ` (${setYear(c.set_name)})` : ""}${c.card_number ? ", Nr. " + esc(c.card_number) : ""}, ${esc(c.language)}${c.foil ? ", Foil" : ""}</p>
-    <div class="hist" id="hist"><p class="muted">Verlauf wird geladen …</p></div>
-    ${priceLines(p)}
-    ${chgLine}
-    ${gainLine}
-    <label>Zustand<select id="cond">${condOptions(c.condition)}</select></label>
-    <label>Menge<input id="qty" type="number" min="1" value="${c.quantity}" inputmode="numeric"></label>
-    <label>Kaufpreis pro Karte in EUR (optional)<input id="pp" type="number" min="0" step="0.01" inputmode="decimal" value="${pp != null ? pp : ""}"></label>
-    <button id="upd" class="primary wide">Änderungen speichern</button>
-    <button id="del" class="danger wide">Karte löschen</button>
-    <p class="err" id="derr"></p>`);
+    <div class="dtop">
+      <div class="dart">${big
+        ? `<img src="${esc(big)}" alt="${esc(c.name)}" onerror="detailImgFallback(this)">`
+        : `<span class="noart">Kein Bild verfügbar</span>`}</div>
+      <div class="dinfo">
+        <p class="muted">${esc(c.set_name || "")}${year ? ` (${year})` : ""}${c.card_number ? `, Nr. ${esc(c.card_number)}` : ""}</p>
+        <div class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</div>
+        ${priceBlock}
+      </div>
+      ${stats.length ? `<div class="dstatswrap"><dl class="dstats">${stats.join("")}</dl>${hasPct ? `<p class="dnote">Prozentwerte: heutiger Trend gegenüber dem jeweiligen Durchschnitt.</p>` : ""}</div>` : ""}
+    </div>
+    <section class="dsec">
+      <h3>Preisverlauf</h3>
+      <div class="hist" id="hist"><p class="muted">Verlauf wird geladen …</p></div>
+    </section>
+    <section class="dsec">
+      <h3>Bearbeiten</h3>
+      <div class="dform">
+        <label class="fcond">Zustand<select id="cond">${condOptions(c.condition)}</select></label>
+        <label>Menge<input id="qty" type="number" min="1" value="${c.quantity}" inputmode="numeric"></label>
+        <label>Kaufpreis pro Karte in €<input id="pp" type="number" min="0" step="0.01" inputmode="decimal" value="${pp != null ? pp : ""}" placeholder="optional"></label>
+      </div>
+      <div class="dactions">
+        <button id="del" class="dangerlink">Karte löschen</button>
+        <button id="upd" class="primary">Änderungen speichern</button>
+      </div>
+      <p class="err" id="derr"></p>
+    </section>`);
 
   $("#upd", sheet).onclick = async () => {
     const ppv = $("#pp", sheet).value;
