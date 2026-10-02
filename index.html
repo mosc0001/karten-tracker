@@ -71,6 +71,17 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .hist{margin:12px 0}
 .hist svg{width:100%;height:auto;display:block}
 .range{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:.8rem}
+.filters{display:grid;gap:8px;margin:0 0 8px}
+.filters input,.filters select{margin-top:0}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#fsort{grid-column:1/-1}
+@media (min-width:600px){.frow{grid-template-columns:1fr 1.4fr 1fr}#fsort{grid-column:auto}}
+.toggle{display:flex;align-items:center;gap:8px;margin:0;color:var(--ink);font-size:.9rem}
+.toggle input{width:auto;margin:0}
+.resultinfo{display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--muted);font-size:.85rem;margin:0 0 8px}
+.resultinfo:empty{display:none}
+.linkish{background:none;border:0;padding:0;color:var(--accent);text-decoration:underline;text-underline-offset:2px;font-size:.9rem}
+.sleeve .linkish{margin-top:6px}
 .plines{list-style:none;padding:0;margin:12px 0 0}
 .plines li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:8px 0;border-bottom:1px solid var(--line)}
 .plines small{grid-column:1/-1;color:var(--muted)}
@@ -102,7 +113,7 @@ const SRC = {
   ebay_sold: "eBay-Verkäufe in deiner Sprache"
 };
 
-const state = { cards: [], latest: {} };
+const state = { cards: [], latest: {}, filter: { q: "", lang: "", set: "", missing: false, sort: "value" } };
 const triedImages = new Set();
 
 // Lädt ein deutsches Bild nicht, wird die englische Version derselben Karte versucht.
@@ -223,34 +234,66 @@ function extraLines(p) {
   return out.join(", ");
 }
 
-function renderMain() {
-  const rows = state.cards.map(c => {
+const SORTS = [["value", "Sortieren: Wert"], ["name", "Sortieren: Name"], ["newest", "Sortieren: Neueste"]];
+const norm = v => String(v ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+function cardRows() {
+  return state.cards.map(c => {
     const p = state.latest[c.id] || {};
     const unit = p.cm_trend ? Number(p.cm_trend.price_eur) : null;
     return { c, p, unit, total: unit == null ? null : unit * c.quantity };
-  }).sort((a, b) => (b.total ?? -1) - (a.total ?? -1));
+  });
+}
 
-  const sum = rows.reduce((s, r) => s + (r.total ?? 0), 0);
-  const missing = rows.filter(r => r.unit == null).length;
+function rowHtml({ c, p, unit, total }) {
+  const extra = extraLines(p);
+  return `<li><button class="row" data-id="${esc(c.id)}">
+    ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" onerror="imgFallback(this)">` : `<span class="thumb"></span>`}
+    <span>
+      <span class="name">${esc(c.name)}</span>
+      <span class="meta"><span>${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
+        <span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}</span>
+    </span>
+    <span class="price">${unit == null ? `<small>kein Preis</small>` : eur(total)}
+      ${c.quantity > 1 && unit != null ? `<small>${c.quantity} × ${eur(unit)}</small>` : ""}
+      ${extra ? `<small>${esc(extra)}</small>` : ""}
+    </span>
+  </button></li>`;
+}
+
+function renderMain() {
+  const all = cardRows();
+  const sum = all.reduce((s, r) => s + (r.total ?? 0), 0);
+  const missing = all.filter(r => r.unit == null).length;
   const qty = state.cards.reduce((s, c) => s + c.quantity, 0);
   const dates = Object.values(state.latest).flatMap(o => Object.values(o)).map(r => r.captured_on).sort();
   const last = dates.length ? dates[dates.length - 1] : "";
 
-  const list = rows.length ? `<ul class="list" id="list">${rows.map(({ c, p, unit, total }) => {
-    const extra = extraLines(p);
-    return `<li><button class="row" data-id="${esc(c.id)}">
-      ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" onerror="imgFallback(this)">` : `<span class="thumb"></span>`}
-      <span>
-        <span class="name">${esc(c.name)}</span>
-        <span class="meta"><span>${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
-          <span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}</span>
-      </span>
-      <span class="price">${eur(total)}
-        ${c.quantity > 1 && unit != null ? `<small>${c.quantity} × ${eur(unit)}</small>` : ""}
-        ${extra ? `<small>${esc(extra)}</small>` : ""}
-      </span>
-    </button></li>`;
-  }).join("")}</ul>` : `<p class="empty">Noch keine Karten. Tippe auf „Karte hinzufügen“ und suche nach dem Namen.</p>`;
+  const f = state.filter;
+  const sets = [...new Set(state.cards.map(c => c.set_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
+  if (f.set && !sets.includes(f.set)) f.set = "";
+  if (!missing) f.missing = false;
+
+  const filters = state.cards.length ? `
+      <section class="filters" aria-label="Suche und Filter">
+        <input id="fq" type="search" placeholder="Name, Set oder Nummer suchen" value="${esc(f.q)}" autocomplete="off" aria-label="Suche">
+        <div class="frow">
+          <select id="flang" aria-label="Sprache">
+            <option value="">Alle Sprachen</option>
+            <option value="DE"${f.lang === "DE" ? " selected" : ""}>Deutsch</option>
+            <option value="EN"${f.lang === "EN" ? " selected" : ""}>Englisch</option>
+          </select>
+          <select id="fset" aria-label="Set">
+            <option value="">Alle Sets</option>
+            ${sets.map(v => `<option value="${esc(v)}"${v === f.set ? " selected" : ""}>${esc(v)}</option>`).join("")}
+          </select>
+          <select id="fsort" aria-label="Sortierung">
+            ${SORTS.map(([v, l]) => `<option value="${v}"${v === f.sort ? " selected" : ""}>${l}</option>`).join("")}
+          </select>
+        </div>
+        ${missing ? `<label class="toggle"><input id="fmissing" type="checkbox"${f.missing ? " checked" : ""}> Nur Einträge ohne Preis</label>` : ""}
+      </section>
+      <div class="resultinfo" id="resinfo"></div>` : "";
 
   $("#app").innerHTML = `
     <div class="wrap">
@@ -264,9 +307,10 @@ function renderMain() {
       <section class="sleeve">
         <p class="total">${eur(sum)}</p>
         <p class="sub">${qty} ${qty === 1 ? "Karte" : "Karten"}${last ? ", Preisstand " + fmtDate(last) : ""}</p>
-        ${missing ? `<p class="sub">${missing} Einträge ohne Preis</p>` : ""}
+        ${missing ? `<button class="linkish" id="showmissing">${missing} ${missing === 1 ? "Eintrag" : "Einträge"} ohne Preis anzeigen</button>` : ""}
       </section>
-      ${list}
+      ${filters}
+      <div id="listwrap"></div>
       <p class="note">Wert = Cardmarket-Trend über alle Sprachen (Quelle: TCGdex). Deutsche Karten werden oft günstiger gehandelt. Der Zustand fließt in diesen Preis noch nicht ein.</p>
     </div>
     <button id="add" class="primary fab">Karte hinzufügen</button>`;
@@ -274,11 +318,85 @@ function renderMain() {
   $("#add").onclick = openAdd;
   $("#logout").onclick = () => db.auth.signOut();
   $("#refresh").onclick = refreshAll;
-  const listEl = $("#list");
-  if (listEl) listEl.onclick = e => {
+
+  const fq = $("#fq");
+  if (fq) {
+    fq.addEventListener("input", () => { f.q = fq.value; renderList(); });
+    $("#flang").onchange = e => { f.lang = e.target.value; renderList(); };
+    $("#fset").onchange = e => { f.set = e.target.value; renderList(); };
+    $("#fsort").onchange = e => { f.sort = e.target.value; renderList(); };
+    const fm = $("#fmissing");
+    if (fm) fm.onchange = () => { f.missing = fm.checked; renderList(); };
+  }
+  const sm = $("#showmissing");
+  if (sm) sm.onclick = () => {
+    f.missing = true;
+    const fm = $("#fmissing");
+    if (fm) fm.checked = true;
+    renderList();
+    $(".filters").scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  $("#listwrap").onclick = e => {
     const b = e.target.closest("[data-id]");
     if (b) openDetail(b.dataset.id);
   };
+  renderList();
+}
+
+function filterActive(f) {
+  return Boolean(f.q.trim() || f.lang || f.set || f.missing);
+}
+
+function resetFilters() {
+  Object.assign(state.filter, { q: "", lang: "", set: "", missing: false });
+  const fq = $("#fq");
+  if (fq) fq.value = "";
+  for (const sel of ["#flang", "#fset"]) { const el = $(sel); if (el) el.value = ""; }
+  const fm = $("#fmissing");
+  if (fm) fm.checked = false;
+  renderList();
+}
+
+function renderList() {
+  const wrap = $("#listwrap");
+  if (!wrap) return;
+  if (!state.cards.length) {
+    wrap.innerHTML = `<p class="empty">Noch keine Karten. Tippe auf „Karte hinzufügen“ und suche nach dem Namen.</p>`;
+    return;
+  }
+  const f = state.filter;
+  const tokens = norm(f.q).split(/\s+/).filter(Boolean);
+  const rows = cardRows().filter(({ c, unit }) => {
+    if (f.lang && c.language !== f.lang) return false;
+    if (f.set && c.set_name !== f.set) return false;
+    if (f.missing && unit != null) return false;
+    if (tokens.length) {
+      const hay = norm(`${c.name} ${c.set_name || ""} ${c.card_number || ""}`);
+      if (!tokens.every(t => hay.includes(t))) return false;
+    }
+    return true;
+  });
+  const sorters = {
+    value: (a, b) => (b.total ?? -1) - (a.total ?? -1),
+    name: (a, b) => a.c.name.localeCompare(b.c.name, "de"),
+    newest: (a, b) => String(b.c.created_at).localeCompare(String(a.c.created_at))
+  };
+  rows.sort(sorters[f.sort] || sorters.value);
+
+  const info = $("#resinfo");
+  if (info) {
+    if (filterActive(f)) {
+      const n = rows.reduce((s, r) => s + r.c.quantity, 0);
+      const v = rows.reduce((s, r) => s + (r.total ?? 0), 0);
+      info.innerHTML = `<span>${n} ${n === 1 ? "Karte" : "Karten"} gefunden, Wert ${eur(v)}</span><button class="linkish" id="freset">Filter zurücksetzen</button>`;
+      $("#freset").onclick = resetFilters;
+    } else {
+      info.innerHTML = "";
+    }
+  }
+  wrap.innerHTML = rows.length
+    ? `<ul class="list">${rows.map(rowHtml).join("")}</ul>`
+    : `<p class="empty">Keine Karte passt zu deiner Suche.</p>`;
 }
 
 async function refreshAll() {
