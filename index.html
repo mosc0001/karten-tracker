@@ -39,6 +39,8 @@ h1,h2,h3{margin:0;line-height:1.2}
 .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;color:var(--muted);font-size:.85rem;margin-top:2px}
 .tag{border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:.78rem;color:var(--muted)}
 .tag.foil{border-color:transparent;background:linear-gradient(115deg,#7ad0ff66,#b69cff66,#ff9fcb66,#ffd97966);color:var(--ink)}
+.tag.first{border-color:var(--accent);color:var(--accent)}
+.fcheck{grid-column:1/-1}
 .price{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
 .price small{display:block;font-weight:400;color:var(--muted);font-size:.8rem}
 .empty{padding:32px 0;color:var(--muted)}
@@ -531,7 +533,7 @@ function rowHtml({ c, p, unit, total }) {
     <span>
       <span class="name">${esc(c.name)}</span>
       <span class="meta"><span>${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
-        <span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}</span>
+        <span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}</span>
     </span>
     <span class="price">${unit == null ? `<small>kein Preis</small>` : eur(total)}
       ${c.quantity > 1 && unit != null ? `<small>${c.quantity} × ${eur(unit)}</small>` : ""}
@@ -549,7 +551,7 @@ function tileHtml({ c, p, unit, total }) {
       : `<span class="noart">${esc(c.name)}</span>`}</span>
     <span class="tname" title="${esc(c.name)}">${esc(c.name)}</span>
     <span class="tset">${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
-    <span class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</span>
+    <span class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</span>
     <span class="tprice"><b>${unit == null ? "kein Preis" : eur(total)}</b>${chgHtml(ci && ci.d30, "Ø30")}</span>
   </button></li>`;
 }
@@ -712,7 +714,7 @@ function renderList() {
     if (f.set && c.set_name !== f.set) return false;
     if (f.missing && unit != null) return false;
     if (tokens.length) {
-      const hay = norm(`${c.name} ${c.set_name || ""} ${c.card_number || ""} ${years.get(c.set_name) || ""}`);
+      const hay = norm(`${c.name} ${c.set_name || ""} ${c.card_number || ""} ${years.get(c.set_name) || ""} ${c.first_edition ? "1st edition first edition" : ""}`);
       if (!tokens.every(t => hay.includes(t))) return false;
     }
     return true;
@@ -923,6 +925,7 @@ function openAdd() {
         <label>Zustand<select id="cond">${condOptions("NM")}</select></label>
         <label>Menge<input id="qty" type="number" min="1" value="1" inputmode="numeric"></label>
         <label class="check"><input id="foil" type="checkbox"${foilOnly ? " checked" : ""}> Holo oder Reverse Holo (Foil-Preis verwenden)</label>
+        <label class="check"><input id="first" type="checkbox"> <span>1st Edition${v.firstEdition ? " (für diese Karte ist ein 1st-Edition-Druck bekannt)" : ""}<br><small class="muted">Nur eine Markierung, der Preis ändert sich dadurch nicht.</small></span></label>
         <label>Kaufpreis pro Karte in EUR (optional)<input id="pp" type="number" min="0" step="0.01" inputmode="decimal"></label>
         <button id="save" class="primary wide">Zur Sammlung hinzufügen</button>
         <p class="err" id="saveerr"></p>`;
@@ -951,9 +954,12 @@ function openAdd() {
       image_url: s.imageUrl,
       foil: $("#foil", sheet).checked
     };
+    if ($("#first", sheet).checked) row.first_edition = true;
     const { data, error } = await db.from("cards").insert(row).select().single();
     if (error) {
-      $("#saveerr", sheet).textContent = "Speichern fehlgeschlagen: " + error.message;
+      $("#saveerr", sheet).textContent = /first_edition/.test(error.message)
+        ? "Bitte zuerst update3.sql in Supabase ausführen, dann erneut speichern."
+        : "Speichern fehlgeschlagen: " + error.message;
       btn.disabled = false;
       return;
     }
@@ -1015,8 +1021,9 @@ async function openDetail(id) {
         : `<span class="noart">Kein Bild verfügbar</span>`}</div>
       <div class="dinfo">
         <p class="muted">${esc(c.set_name || "")}${year ? ` (${year})` : ""}${c.card_number ? `, Nr. ${esc(c.card_number)}` : ""}</p>
-        <div class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</div>
+        <div class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${c.foil ? `<span class="tag foil">Foil</span>` : ""}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</div>
         ${priceBlock}
+        ${c.first_edition ? `<p class="dnote">Markiert als 1st Edition. Der Cardmarket-Trend bildet die 1st Edition nicht zwingend ab und kann abweichen.</p>` : ""}
       </div>
       ${stats.length ? `<div class="dstatswrap"><dl class="dstats">${stats.join("")}</dl>${hasPct ? `<p class="dnote">Prozentwerte: heutiger Trend gegenüber dem jeweiligen Durchschnitt.</p>` : ""}</div>` : ""}
     </div>
@@ -1030,6 +1037,7 @@ async function openDetail(id) {
         <label class="fcond">Zustand<select id="cond">${condOptions(c.condition)}</select></label>
         <label>Menge<input id="qty" type="number" min="1" value="${c.quantity}" inputmode="numeric"></label>
         <label>Kaufpreis pro Karte in €<input id="pp" type="number" min="0" step="0.01" inputmode="decimal" value="${pp != null ? pp : ""}" placeholder="optional"></label>
+        <label class="check fcheck"><input id="first" type="checkbox"${c.first_edition ? " checked" : ""}> 1st Edition</label>
       </div>
       <div class="dactions">
         <button id="del" class="dangerlink">Karte löschen</button>
@@ -1040,12 +1048,21 @@ async function openDetail(id) {
 
   $("#upd", sheet).onclick = async () => {
     const ppv = $("#pp", sheet).value;
-    const { error } = await db.from("cards").update({
+    const patch = {
       condition: $("#cond", sheet).value,
       quantity: Math.max(1, parseInt($("#qty", sheet).value, 10) || 1),
       purchase_price_eur: ppv === "" ? null : Number(ppv)
-    }).eq("id", id);
-    if (error) { $("#derr", sheet).textContent = "Speichern fehlgeschlagen: " + error.message; return; }
+    };
+    // Die Spalte nur senden, wenn sich der Wert ändert: so funktioniert Speichern auch vor update3.sql
+    const fe = $("#first", sheet).checked;
+    if (fe !== Boolean(c.first_edition)) patch.first_edition = fe;
+    const { error } = await db.from("cards").update(patch).eq("id", id);
+    if (error) {
+      $("#derr", sheet).textContent = /first_edition/.test(error.message)
+        ? "Bitte zuerst update3.sql in Supabase ausführen, dann erneut speichern."
+        : "Speichern fehlgeschlagen: " + error.message;
+      return;
+    }
     closeSheet();
     await loadMain({ quiet: true });
   };
