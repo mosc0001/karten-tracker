@@ -82,6 +82,14 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .resultinfo:empty{display:none}
 .linkish{background:none;border:0;padding:0;color:var(--accent);text-decoration:underline;text-underline-offset:2px;font-size:.9rem}
 .sleeve .linkish{margin-top:6px}
+.sugwrap{position:relative}
+.sug{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;list-style:none;margin:0;padding:4px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 24px rgba(8,12,24,.35);max-height:320px;overflow:auto}
+.sug[hidden]{display:none}
+.sug li{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:10px;border-radius:8px;cursor:pointer}
+.sug li.active,.sug li:hover{background:var(--bg)}
+.sugtype{font-size:.72rem;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:0 6px;min-width:3.8em;text-align:center}
+.suglabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sugcount{color:var(--muted);font-size:.8rem;font-variant-numeric:tabular-nums}
 .plines{list-style:none;padding:0;margin:12px 0 0}
 .plines li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:8px 0;border-bottom:1px solid var(--line)}
 .plines small{grid-column:1/-1;color:var(--muted)}
@@ -115,6 +123,8 @@ const SRC = {
 
 const state = { cards: [], latest: {}, filter: { q: "", lang: "", set: "", missing: false, sort: "value" } };
 const triedImages = new Set();
+const YEAR_KEY = "kt_set_years_v1";
+try { state.setYears = JSON.parse(localStorage.getItem(YEAR_KEY) || "{}") || {}; } catch (e) { state.setYears = {}; }
 
 // Lädt ein deutsches Bild nicht, wird die englische Version derselben Karte versucht.
 window.imgFallback = img => {
@@ -225,6 +235,7 @@ async function loadMain() {
   }
   renderMain();
   repairImages();
+  loadSetYears();
 }
 
 function extraLines(p) {
@@ -236,6 +247,136 @@ function extraLines(p) {
 
 const SORTS = [["value", "Sortieren: Wert"], ["name", "Sortieren: Name"], ["newest", "Sortieren: Neueste"]];
 const norm = v => String(v ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+function setIdOf(c) {
+  const id = c.tcgdex_id;
+  if (!id) return null;
+  const suffix = c.card_number ? "-" + c.card_number : null;
+  if (suffix && id.endsWith(suffix)) return id.slice(0, -suffix.length);
+  const i = id.lastIndexOf("-");
+  return i > 0 ? id.slice(0, i) : null;
+}
+
+function setYear(setName) {
+  for (const c of state.cards) {
+    if (c.set_name !== setName) continue;
+    const y = state.setYears[setIdOf(c)];
+    if (y) return y;
+  }
+  return "";
+}
+
+const setLabel = name => { const y = setYear(name); return y ? `${name} (${y})` : name; };
+
+function setNames() {
+  return [...new Set(state.cards.map(c => c.set_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
+}
+
+async function loadSetYears() {
+  const todo = new Map();
+  for (const c of state.cards) {
+    const id = setIdOf(c);
+    if (id && !(id in state.setYears) && !todo.has(id)) todo.set(id, c.language.toLowerCase());
+  }
+  if (!todo.size) return;
+  let changed = false;
+  for (const [id, lang] of todo) {
+    let date = null, reached = false;
+    for (const l of lang === "en" ? ["en"] : [lang, "en"]) {
+      try {
+        const set = await tcg(`${l}/sets/${encodeURIComponent(id)}`);
+        reached = true;
+        if (set && set.releaseDate) { date = set.releaseDate; break; }
+      } catch (e) { /* nächste Sprache versuchen */ }
+    }
+    if (date) { state.setYears[id] = date.slice(0, 4); changed = true; }
+    else if (reached) { state.setYears[id] = ""; changed = true; }
+  }
+  if (!changed) return;
+  try { localStorage.setItem(YEAR_KEY, JSON.stringify(state.setYears)); } catch (e) { /* Speicher nicht verfügbar */ }
+  updateSetOptions();
+  if (state.filter.q.trim()) renderList();
+}
+
+function updateSetOptions() {
+  const sel = $("#fset");
+  if (!sel) return;
+  const f = state.filter;
+  sel.innerHTML = `<option value="">Alle Sets</option>` +
+    setNames().map(v => `<option value="${esc(v)}"${v === f.set ? " selected" : ""}>${esc(setLabel(v))}</option>`).join("");
+}
+
+function suggestions(q) {
+  const nq = norm(q).trim();
+  const tokens = nq.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return [];
+  const match = label => { const h = norm(label); return tokens.every(t => h.includes(t)); };
+  const score = label => (norm(label).startsWith(nq) ? 0 : 1);
+  const count = (key, val) => state.cards.filter(c => c[key] === val).reduce((s, c) => s + c.quantity, 0);
+  const bySc = (a, b) => score(a.label) - score(b.label) || a.label.localeCompare(b.label, "de");
+  const sets = setNames().filter(n => match(setLabel(n)))
+    .map(n => ({ type: "set", value: n, label: setLabel(n), n: count("set_name", n) })).sort(bySc).slice(0, 4);
+  const names = [...new Set(state.cards.map(c => c.name))].filter(match)
+    .map(n => ({ type: "name", value: n, label: n, n: count("name", n) })).sort(bySc).slice(0, 6);
+  return [...sets, ...names];
+}
+
+function wireSuggestions(input) {
+  const list = $("#fsug");
+  const f = state.filter;
+  let items = [], active = -1;
+  const hide = () => {
+    list.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+    active = -1;
+  };
+  const paint = () => {
+    list.querySelectorAll("li").forEach((li, i) => li.classList.toggle("active", i === active));
+    if (active >= 0) input.setAttribute("aria-activedescendant", `sug-${active}`);
+    else input.removeAttribute("aria-activedescendant");
+  };
+  const show = () => {
+    items = suggestions(input.value);
+    active = -1;
+    if (!items.length) return hide();
+    list.innerHTML = items.map((s, i) => `<li id="sug-${i}" role="option" data-i="${i}">
+      <span class="sugtype">${s.type === "set" ? "Set" : "Karte"}</span>
+      <span class="suglabel">${esc(s.label)}</span>
+      <span class="sugcount">${s.n} ${s.n === 1 ? "Karte" : "Karten"}</span></li>`).join("");
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  };
+  const choose = s => {
+    if (s.type === "set") {
+      f.set = s.value;
+      f.q = "";
+      input.value = "";
+      const sel = $("#fset");
+      if (sel) sel.value = s.value;
+    } else {
+      f.q = s.value;
+      input.value = s.value;
+    }
+    hide();
+    renderList();
+  };
+  input.addEventListener("input", () => { f.q = input.value; renderList(); show(); });
+  input.addEventListener("focus", show);
+  input.addEventListener("blur", () => setTimeout(hide, 150));
+  input.addEventListener("keydown", e => {
+    if (list.hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % items.length; paint(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = active <= 0 ? items.length - 1 : active - 1; paint(); }
+    else if (e.key === "Enter" && active >= 0) { e.preventDefault(); choose(items[active]); }
+    else if (e.key === "Escape") { hide(); }
+  });
+  list.addEventListener("mousedown", e => e.preventDefault());
+  list.addEventListener("click", e => {
+    const li = e.target.closest("li[data-i]");
+    if (li) choose(items[Number(li.dataset.i)]);
+  });
+}
 
 function cardRows() {
   return state.cards.map(c => {
@@ -270,13 +411,16 @@ function renderMain() {
   const last = dates.length ? dates[dates.length - 1] : "";
 
   const f = state.filter;
-  const sets = [...new Set(state.cards.map(c => c.set_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
+  const sets = setNames();
   if (f.set && !sets.includes(f.set)) f.set = "";
   if (!missing) f.missing = false;
 
   const filters = state.cards.length ? `
       <section class="filters" aria-label="Suche und Filter">
-        <input id="fq" type="search" placeholder="Name, Set oder Nummer suchen" value="${esc(f.q)}" autocomplete="off" aria-label="Suche">
+        <div class="sugwrap">
+          <input id="fq" type="search" placeholder="Name, Set oder Nummer suchen" value="${esc(f.q)}" autocomplete="off" aria-label="Suche" role="combobox" aria-autocomplete="list" aria-controls="fsug" aria-expanded="false">
+          <ul id="fsug" class="sug" role="listbox" aria-label="Vorschläge" hidden></ul>
+        </div>
         <div class="frow">
           <select id="flang" aria-label="Sprache">
             <option value="">Alle Sprachen</option>
@@ -285,7 +429,7 @@ function renderMain() {
           </select>
           <select id="fset" aria-label="Set">
             <option value="">Alle Sets</option>
-            ${sets.map(v => `<option value="${esc(v)}"${v === f.set ? " selected" : ""}>${esc(v)}</option>`).join("")}
+            ${sets.map(v => `<option value="${esc(v)}"${v === f.set ? " selected" : ""}>${esc(setLabel(v))}</option>`).join("")}
           </select>
           <select id="fsort" aria-label="Sortierung">
             ${SORTS.map(([v, l]) => `<option value="${v}"${v === f.sort ? " selected" : ""}>${l}</option>`).join("")}
@@ -321,7 +465,7 @@ function renderMain() {
 
   const fq = $("#fq");
   if (fq) {
-    fq.addEventListener("input", () => { f.q = fq.value; renderList(); });
+    wireSuggestions(fq);
     $("#flang").onchange = e => { f.lang = e.target.value; renderList(); };
     $("#fset").onchange = e => { f.set = e.target.value; renderList(); };
     $("#fsort").onchange = e => { f.sort = e.target.value; renderList(); };
@@ -366,12 +510,13 @@ function renderList() {
   }
   const f = state.filter;
   const tokens = norm(f.q).split(/\s+/).filter(Boolean);
+  const years = new Map(setNames().map(n => [n, setYear(n)]));
   const rows = cardRows().filter(({ c, unit }) => {
     if (f.lang && c.language !== f.lang) return false;
     if (f.set && c.set_name !== f.set) return false;
     if (f.missing && unit != null) return false;
     if (tokens.length) {
-      const hay = norm(`${c.name} ${c.set_name || ""} ${c.card_number || ""}`);
+      const hay = norm(`${c.name} ${c.set_name || ""} ${c.card_number || ""} ${years.get(c.set_name) || ""}`);
       if (!tokens.every(t => hay.includes(t))) return false;
     }
     return true;
