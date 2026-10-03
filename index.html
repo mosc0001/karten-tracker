@@ -420,11 +420,30 @@ function median(a) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+// Kartennummer zerlegen: "108" -> {prefix:"", num:108}, "H03" -> {prefix:"h", num:3}, "TG05" -> {prefix:"tg", num:5}
+function parseNumber(n) {
+  const m = String(n ?? "").trim().match(/^([A-Za-z]{0,5})\s*0*(\d+)/);
+  return m ? { prefix: m[1].toLowerCase(), num: Number(m[2]) } : { prefix: "", num: NaN };
+}
+
+// Gehört der Verkauf zu genau dieser Karte? Nummern mit Buchstaben (H3/H32) sind eine andere Karte als 3/147.
 function relevant(card, sale) {
   const t = norm(sale.title);
-  const nums = [...t.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].map((m) => [Number(m[1]), Number(m[2])]);
-  const want = Number(String(card.number).replace(/\D/g, ""));
-  if (nums.length) return nums.some(([a, b]) => a === want && (!card.setTotal || b === Number(card.setTotal)));
+  const want = parseNumber(card.number);
+  const toks = [...t.matchAll(/\b([a-z]{0,5})0*(\d{1,3})\s*\/\s*([a-z]{0,5})0*(\d{1,3})\b/g)]
+    .map((m) => ({ pre: m[1], num: Number(m[2]), den: Number(m[4]) }));
+  if (toks.length) {
+    return toks.some((k) => k.pre === want.prefix && k.num === want.num &&
+      (want.prefix || !card.setTotal || k.den === Number(card.setTotal)));
+  }
+  // ohne "x/y": Buchstaben-Nummern wie "H29" allein im Titel
+  const lone = [...t.matchAll(/\b([a-z]{1,5})\s?0*(\d{1,3})\b/g)].filter((m) => m[1] === want.prefix || (!want.prefix && m[1] === "h"));
+  if (want.prefix) {
+    if (lone.some((m) => m[1] === want.prefix && Number(m[2]) === want.num)) return true;
+    if (lone.length) return false;
+  } else if (lone.length) {
+    return false; // Titel nennt eine Holo-Nummer (H..), deine Karte hat keine
+  }
   const words = norm(card.name).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
   return words.length > 0 && words.some((w) => t.includes(w));
 }
@@ -642,13 +661,36 @@ window.detailImgFallback = img => {
   window.imgFallback(img);
 };
 
+// Zweite Bildquelle für Karten, zu denen TCGdex kein Bild hat (häufig bei älteren Holos, z. B. Aquapolis H3).
+// TCGdex-Kennung "ecard2-H03" -> https://images.pokemontcg.io/ecard2/H3.png
+const altImageUrl = id => {
+  const m = String(id || "").match(/^(.+)-([^-]+)$/);
+  if (!m) return null;
+  const n = m[2].match(/^([A-Za-z]*)0*(\d+)$/); // "H03" -> "H3", "003" -> "3": der Bilddienst nutzt keine führenden Nullen
+  const num = n ? n[1].toUpperCase() + n[2] : m[2];
+  return `https://images.pokemontcg.io/${encodeURIComponent(m[1])}/${encodeURIComponent(num)}.png`;
+};
+const probeImage = (url, ms = 6000) => new Promise(resolve => {
+  const i = new Image();
+  const t = setTimeout(() => { i.src = ""; resolve(false); }, ms);
+  i.onload = () => { clearTimeout(t); resolve(true); };
+  i.onerror = () => { clearTimeout(t); resolve(false); };
+  i.src = url;
+});
+
 window.imgFallback = img => {
   if (!img.dataset.fb && img.src.includes("/de/")) {
     img.dataset.fb = "1";
     img.src = img.src.replace("/de/", "/en/");
-  } else {
-    img.style.visibility = "hidden";
+    return;
   }
+  const alt = altImageUrl(img.dataset.tid);
+  if (alt && !img.dataset.fb2 && img.src !== alt) {
+    img.dataset.fb2 = "1";
+    img.src = alt;
+    return;
+  }
+  img.style.visibility = "hidden";
 };
 
 const condOptions = sel =>
@@ -668,8 +710,10 @@ async function imageFor(id, lang, own) {
     try {
       const en = await tcg(`en/cards/${encodeURIComponent(id)}`);
       if (en.image) return `${en.image}/low.webp`;
-    } catch (e) { /* kein Ersatzbild verfügbar */ }
+    } catch (e) { /* weiter mit der zweiten Quelle */ }
   }
+  const alt = altImageUrl(id);
+  if (alt && await probeImage(alt)) return alt;
   return null;
 }
 
@@ -953,7 +997,7 @@ function priceCell({ c, e, unit, total, counted }) {
 function rowHtml(r) {
   const c = r.c;
   return `<li><button class="row" data-id="${esc(c.id)}">
-    ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" onerror="imgFallback(this)">` : `<span class="thumb"></span>`}
+    ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" data-tid="${esc(c.tcgdex_id || "")}" onerror="imgFallback(this)">` : `<span class="thumb"></span>`}
     <span>
       <span class="name">${esc(c.name)}</span>
       <span class="meta"><span>${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
@@ -967,7 +1011,7 @@ function tileHtml(r) {
   const c = r.c;
   return `<li><button class="tile" data-id="${esc(c.id)}">
     <span class="art">${c.image_url
-      ? `<img src="${esc(c.image_url)}" alt="" loading="lazy" onerror="imgFallback(this)">`
+      ? `<img src="${esc(c.image_url)}" alt="" loading="lazy" data-tid="${esc(c.tcgdex_id || "")}" onerror="imgFallback(this)">`
       : `<span class="noart">${esc(c.name)}</span>`}</span>
     <span class="tname" title="${esc(c.name)}">${esc(c.name)}</span>
     <span class="tset">${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
@@ -1231,7 +1275,7 @@ function openAdd() {
     res.innerHTML = `${msg ? `<p class="okmsg" role="status">${esc(msg)}</p>` : ""}${list.length ? `<ul class="results">${list.map(c => {
       const sid = setIdFromCardId(c.id, c.localId);
       return `<li><button class="pick" data-id="${esc(c.id)}">
-        ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="imgFallback(this)">` : `<span class="noimg"></span>`}
+        ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" data-tid="${esc(c.id || "")}" onerror="imgFallback(this)">` : `<span class="noimg"></span>`}
         <span><b>${esc(c.name)}</b><small>${esc(c.setName || sid)}${yr(sid)}, Nr. ${esc(c.localId)}</small></span></button></li>`;
     }).join("")}</ul>` : ""}`;
     res.querySelectorAll(".pick").forEach(b => b.onclick = () => pick(b.dataset.id));
@@ -1304,7 +1348,7 @@ function openAdd() {
       res.innerHTML = `
         ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
         <div class="preview">
-          ${s.imageUrl ? `<img src="${esc(s.imageUrl)}" alt="" onerror="imgFallback(this)">` : ""}
+          ${s.imageUrl ? `<img src="${esc(s.imageUrl)}" alt="" data-tid="${esc((s.picked && s.picked.id) || "")}" onerror="imgFallback(this)">` : ""}
           <div>
             <h3>${esc(c.name)}</h3>
             <p class="muted">${esc(c.set && c.set.name || "")}${year}, Nr. ${esc(c.localId)}</p>
@@ -1442,7 +1486,7 @@ async function openDetail(id) {
     <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
     <div class="dtop">
       <div class="dart">${big
-        ? `<img src="${esc(big)}" alt="${esc(c.name)}" onerror="detailImgFallback(this)">`
+        ? `<img src="${esc(big)}" alt="${esc(c.name)}" data-tid="${esc(c.tcgdex_id || "")}" onerror="detailImgFallback(this)">`
         : `<span class="noart">Kein Bild verfügbar</span>`}</div>
       <div class="dinfo">
         <p class="muted">${esc(c.set_name || "")}${year ? ` (${year})` : ""}${c.card_number ? `, Nr. ${esc(c.card_number)}` : ""}</p>
@@ -1469,6 +1513,7 @@ async function openDetail(id) {
         <label>Kaufpreis pro Karte in €<input id="pp" type="number" min="0" step="0.01" inputmode="decimal" value="${pp != null ? pp : ""}" placeholder="optional"></label>
         <label class="check fcheck"><input id="first" type="checkbox"${c.first_edition ? " checked" : ""}> 1st Edition</label>
         <label class="fwide">Sprache der Karte<select id="lang"><option value="DE"${c.language === "DE" ? " selected" : ""}>Deutsch</option><option value="EN"${c.language === "EN" ? " selected" : ""}>Englisch</option></select></label>
+        <label class="fwide">Bildadresse (leer = automatisch)<input id="imgurl" type="url" value="${esc(c.image_url || "")}" placeholder="https://… (Adresse eines Kartenbilds)" autocomplete="off"></label>
         <label class="fwide">eBay-Suchbegriff (leer = automatisch)<input id="eq" type="text" value="${esc(c.ebay_query || "")}" placeholder="${esc(EBAY.buildQuery({ name: c.name, setName: c.set_name }))}" autocomplete="off"></label>
       </div>
       <div class="dactions">
@@ -1577,6 +1622,9 @@ async function openDetail(id) {
     if (fin !== finishOf(c)) { patch.finish = fin; patch.foil = fin !== "non_holo"; }
     const lang = $("#lang", sheet).value;
     if (lang !== c.language) patch.language = lang;
+    const iu = $("#imgurl", sheet).value.trim();
+    if (iu && !/^https:\/\//i.test(iu)) { $("#derr", sheet).textContent = "Die Bildadresse muss mit https:// beginnen."; return; }
+    if ((iu || null) !== (c.image_url || null)) patch.image_url = iu || null;
     const q = $("#eq", sheet).value.trim();
     if ((q || null) !== (c.ebay_query || null)) { patch.ebay_query = q || null; patch.ebay_checked_at = null; } // neuer Suchbegriff: beim nächsten Lauf sofort abfragen
     if (needsUpdate4()) { $("#derr", sheet).textContent = UPDATE4_MSG; return; }
