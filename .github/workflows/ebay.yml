@@ -1,0 +1,38 @@
+name: eBay-Verkäufe abfragen
+
+on:
+  schedule:
+    # täglich um 04:40 UTC. Der Job entscheidet selbst, welche Karten fällig sind
+    # und hält das Budget ein. An Tagen ohne fällige Karten kostet er nichts.
+    - cron: "40 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ebay-sales
+  cancel-in-progress: false
+
+jobs:
+  ebay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: eBay-Verkäufe abfragen und Werte berechnen
+        run: node scripts/ebay-sales.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          # Kostenbremse in Dollar (Schätzung). Hier kannst du die Werte ändern.
+          EBAY_MONTH_BUDGET_USD: "4.0"
+          EBAY_RUN_BUDGET_USD: "1.2"
+          # die wertvollsten Karten wöchentlich, alle übrigen alle 28 Tage
+          EBAY_TOP_N: "15"
+          EBAY_TOP_EVERY_DAYS: "7"
+          EBAY_REST_EVERY_DAYS: "28"
