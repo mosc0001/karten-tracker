@@ -31,7 +31,7 @@ jobs:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           # Kostenbremse in Dollar (Schätzung). Hier kannst du die Werte ändern.
           EBAY_MONTH_BUDGET_USD: "18.0"
-          EBAY_RUN_BUDGET_USD: "5.0"
+          EBAY_RUN_BUDGET_USD: "8.0"
           # die wertvollsten Karten wöchentlich, alle übrigen alle 28 Tage
           EBAY_TOP_N: "15"
           EBAY_TOP_EVERY_DAYS: "7"
