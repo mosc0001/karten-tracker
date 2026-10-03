@@ -198,11 +198,30 @@ function median(a) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+// Kartennummer zerlegen: "108" -> {prefix:"", num:108}, "H03" -> {prefix:"h", num:3}, "TG05" -> {prefix:"tg", num:5}
+function parseNumber(n) {
+  const m = String(n ?? "").trim().match(/^([A-Za-z]{0,5})\s*0*(\d+)/);
+  return m ? { prefix: m[1].toLowerCase(), num: Number(m[2]) } : { prefix: "", num: NaN };
+}
+
+// Gehört der Verkauf zu genau dieser Karte? Nummern mit Buchstaben (H3/H32) sind eine andere Karte als 3/147.
 function relevant(card, sale) {
   const t = norm(sale.title);
-  const nums = [...t.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].map((m) => [Number(m[1]), Number(m[2])]);
-  const want = Number(String(card.number).replace(/\D/g, ""));
-  if (nums.length) return nums.some(([a, b]) => a === want && (!card.setTotal || b === Number(card.setTotal)));
+  const want = parseNumber(card.number);
+  const toks = [...t.matchAll(/\b([a-z]{0,5})0*(\d{1,3})\s*\/\s*([a-z]{0,5})0*(\d{1,3})\b/g)]
+    .map((m) => ({ pre: m[1], num: Number(m[2]), den: Number(m[4]) }));
+  if (toks.length) {
+    return toks.some((k) => k.pre === want.prefix && k.num === want.num &&
+      (want.prefix || !card.setTotal || k.den === Number(card.setTotal)));
+  }
+  // ohne "x/y": Buchstaben-Nummern wie "H29" allein im Titel
+  const lone = [...t.matchAll(/\b([a-z]{1,5})\s?0*(\d{1,3})\b/g)].filter((m) => m[1] === want.prefix || (!want.prefix && m[1] === "h"));
+  if (want.prefix) {
+    if (lone.some((m) => m[1] === want.prefix && Number(m[2]) === want.num)) return true;
+    if (lone.length) return false;
+  } else if (lone.length) {
+    return false; // Titel nennt eine Holo-Nummer (H..), deine Karte hat keine
+  }
   const words = norm(card.name).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
   return words.length > 0 && words.some((w) => t.includes(w));
 }
