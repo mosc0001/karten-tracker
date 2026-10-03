@@ -150,6 +150,13 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .ctab td.num,.ctab th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ctab tbody th small{display:block;color:var(--muted);font-size:.76rem}
 .ctab tr.own th,.ctab tr.own td.price{font-weight:700}
+.ctab tr.can{cursor:pointer}
+.ctab tr.can:hover>*{background:rgba(127,127,127,.07)}
+.ctab .cbtn{all:unset;cursor:pointer;font:inherit;color:inherit}
+.ctab .cbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.ctab .chev{display:inline-block;width:1.1em;color:var(--muted);font-size:.85em}
+.ctab tr.exp>td{padding:0 0 10px;border-top:0;font-size:1rem}
+.ctab tr.exp .sales{margin:0}
 .ctab .own-mark{font-size:.72rem;padding:1px 6px;margin-left:4px;vertical-align:1px;white-space:nowrap;display:inline-block;font-weight:600}
 .drow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:.9rem}
 .drow dt{color:var(--muted)}
@@ -1507,7 +1514,7 @@ async function openDetail(id) {
       <div id="bycond"><p class="muted dsmall">Wird geladen …</p></div>
     </section>
     <section class="dsec">
-      <h3>Verkäufe auf eBay</h3>
+      <h3>Aussortierte Verkäufe</h3>
       <div id="sales"><p class="muted dsmall">Wird geladen …</p></div>
       <p class="err" id="smsg"></p>
     </section>
@@ -1541,81 +1548,95 @@ async function openDetail(id) {
     return EBAY.matchCard(EBAY.cardFromRow(card), live);
   };
 
+  const STAGE_NAMES = { NM: "Near Mint or Better", LP: "Lightly Played", MP: "Moderately Played", HP: "Heavily Played" };
+  const openStages = new Set([c.condition]); // aufgeklappte Zustände, deiner ist zu Beginn offen
+  let lastRes = null;
+
+  const saleLi = s => `<li class="sale">
+      <span class="sd">${shortDate(s.soldAt)}</span>
+      <span class="st">${saleTags(s)}</span>
+      <span class="sp">${eur(s.price)}${s.priceUncertain ? `<small>Preisvorschlag</small>` : ""}</span>
+      <a class="stl" href="${esc(s.url || "#")}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
+      <button class="ghost sx" data-x="${s._id}">Ausschließen</button>
+    </li>`;
+
   const renderSales = () => {
-    const box = $("#sales", sheet);
-    if (!box || !rows) return;
+    if (!rows) return;
     const res = compute(c);
+    lastRes = res;
     const snap = EBAY.snapshotPayload(res);
     const eNow = snap ? { unit: snap.price, n: snap.details.n, basis: snap.details.basis, tier: snap.details.tier, counts: snap.details.counts, d: snap.details } : null;
     $("#dvalue", sheet).innerHTML = valueBlockHtml(c, eNow);
     $("#dstats", sheet).innerHTML = statsHtml(c, eNow);
     renderByCond(res);
 
-    const head = res.tier === "none"
-      ? `Kein passender Verkauf gefunden.${res.candidates ? ` ${res.candidates} Verkäufe wurden geprüft, passen aber nicht zu Zustand, Sprache, Ausführung oder Edition deiner Karte.` : ""}`
-      : res.tier === "strict"
-        ? `Median aus ${res.headline.n} Verkäufen (${res.headline.basis}). Alle Merkmale sind belegt.`
-        : `Median aus ${res.headline.n} Verkäufen (${res.headline.basis}), teils mit Annahmen: Eine unbekannte Sprache oder Ausführung gilt als passend.`;
-
-    const saleLi = s => `<li class="sale">
-        <span class="sd">${shortDate(s.soldAt)}</span>
-        <span class="st">${saleTags(s)}</span>
-        <span class="sp">${eur(s.price)}${s.priceUncertain ? `<small>Preisvorschlag</small>` : ""}</span>
-        <a class="stl" href="${esc(s.url || "#")}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
-        <button class="ghost sx" data-x="${s._id}">Ausschließen</button>
-      </li>`;
-    const shown = res.used.slice(0, 40);
+    const box = $("#sales", sheet);
+    if (!box) return;
     const userEx = rows.filter(r => r.excluded);
-    const mismTotal = Object.values(res.mismatched).reduce((a, b) => a + b, 0);
+    const mismTotal = Object.values(res.mismatched).reduce((x, y) => x + y, 0);
     const open = Math.max(0, res.candidates - res.relaxedN - mismTotal);
     const bits = [
       ...Object.entries(res.excluded).filter(([k, v]) => v && EXCL_LABELS[k]).map(([k, v]) => `${EXCL_LABELS[k]}: ${v}`),
-      ...Object.entries(res.mismatched).filter(([, v]) => v).map(([k, v]) => `${MISM_LABELS[k]}: ${v}`),
+      ...Object.entries(res.mismatched).filter(([k, v]) => v && k !== "condition").map(([k, v]) => `${MISM_LABELS[k]}: ${v}`),
       ...(open ? [`offene Angaben (Zustand oder Sprache nicht erkennbar): ${open}`] : []),
     ];
     box.innerHTML = `
-      <p class="dsmall">${esc(head)}</p>
-      ${shown.length ? `<ul class="sales">${shown.map(saleLi).join("")}</ul>` : ""}
-      ${res.used.length > shown.length ? `<p class="muted dsmall">und ${res.used.length - shown.length} weitere</p>` : ""}
-      ${bits.length || userEx.length ? `<details class="more"><summary>Aussortiert (${bits.length ? bits.length + " Gründe" : "von dir"})</summary>
-        ${bits.length ? `<ul>${bits.map(b => `<li>${esc(b)}</li>`).join("")}</ul>` : ""}
-        ${userEx.length ? `<p>Von dir ausgeschlossen:</p><ul class="sales">${userEx.map(r => `<li class="sale">
-          <span class="sd">${shortDate(r.sold_at)}</span><span class="st"></span><span class="sp">${eur(Number(r.price_eur))}</span>
-          <span class="stl" title="${esc(r.title)}">${esc(r.title)}</span>
-          <button class="ghost sx" data-in="${r.id}">Wieder einbeziehen</button></li>`).join("")}</ul>` : ""}
-      </details>` : ""}`;
+      ${bits.length ? `<details class="more"><summary>Nicht berücksichtigt (${bits.length} ${bits.length === 1 ? "Grund" : "Gründe"})</summary>
+        <ul>${bits.map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}
+      ${userEx.length ? `<p class="dsmall">Von dir ausgeschlossen:</p><ul class="sales">${userEx.map(r => `<li class="sale">
+        <span class="sd">${shortDate(r.sold_at)}</span><span class="st"></span><span class="sp">${eur(Number(r.price_eur))}</span>
+        <a class="stl" href="${esc(r.url || "#")}" target="_blank" rel="noopener" title="${esc(r.title)}">${esc(r.title)}</a>
+        <button class="ghost sx" data-in="${r.id}">Wieder einbeziehen</button></li>`).join("")}</ul>` : ""}
+      ${!bits.length && !userEx.length ? `<p class="muted dsmall">Nichts aussortiert.</p>` : ""}`;
   };
 
-  const STAGE_NAMES = { NM: "Near Mint or Better", LP: "Lightly Played", MP: "Moderately Played", HP: "Heavily Played" };
   const renderByCond = res => {
     const box = $("#bycond", sheet);
     if (!box) return;
+    const nowMs = Date.now();
+    const head = res.tier === "none"
+      ? "Für deinen Zustand gibt es keinen passenden Verkauf."
+      : `Dein Wert: Median aus ${res.headline.n} ${res.headline.n === 1 ? "Verkauf" : "Verkäufen"} (${res.headline.basis})${res.tier === "strict" ? ", alle Merkmale belegt." : ", teils mit Annahmen: Eine unbekannte Sprache oder Ausführung gilt als passend."}`;
     const lines = EBAY.STAGES.map(st => {
       const r = st === c.condition ? res : compute({ ...c, condition: st });
       const h = r.headline;
       const own = st === c.condition;
+      // genau die Verkäufe, aus denen der Median dieser Zeile stammt
+      const days = h && h.basis === "90 Tage" ? 90 : 365;
+      const list = h ? r.used.filter(x => nowMs - new Date(x.soldAt).getTime() <= days * 86400000) : [];
+      const older = h ? r.used.length - list.length : 0;
+      const can = list.length > 0;
+      const isOpen = can && openStages.has(st);
       const price = h ? `<span class="${h.n >= 3 ? "" : "prov"}">${eur(h.value)}</span>` : `<span class="muted">–</span>`;
       const n = h ? `${h.n} ${h.n === 1 ? "Verkauf" : "Verkäufe"}, ${h.basis}${h.n >= 3 ? "" : ", vorläufig"}` : "kein Verkauf";
-      return `<tr class="${own ? "own" : ""}">
-        <th scope="row">${st}${own ? ` <span class="tag own-mark">deine Karte</span>` : ""}<small>${STAGE_NAMES[st]}</small></th>
+      const label = `<span class="chev" aria-hidden="true">${can ? (isOpen ? "▾" : "▸") : ""}</span>${st}`;
+      const row = `<tr class="${[own ? "own" : "", can ? "can" : ""].join(" ").trim()}"${can ? ` data-stage="${st}"` : ""}>
+        <th scope="row">${can ? `<button class="cbtn" data-stage="${st}" aria-expanded="${isOpen}">${label}</button>` : label}${own ? ` <span class="tag own-mark">deine Karte</span>` : ""}<small>${STAGE_NAMES[st]}</small></th>
         <td class="num price">${price}</td>
         <td class="num"><small>${n}</small></td></tr>`;
+      const exp = isOpen ? `<tr class="exp" data-for="${st}"><td colspan="3">
+        <ul class="sales">${list.slice(0, 40).map(saleLi).join("")}</ul>
+        ${list.length > 40 ? `<p class="muted dsmall">und ${list.length - 40} weitere</p>` : ""}
+        ${older ? `<p class="muted dsmall">Dazu ${older} ${older === 1 ? "älterer Verkauf" : "ältere Verkäufe"} bis 12 Monate, nicht im Median.</p>` : ""}
+      </td></tr>` : "";
+      return row + exp;
     }).join("");
     const unknown = res.rejected.filter(x => x.reason === "unknown_condition").length;
     // Beginn des geladenen Zeitraums: einzelne sehr alte Verkäufe (Angebote mit mehreren Stück) zählen nicht
-    const times = rows.map(r => new Date(r.sold_at).getTime()).filter(Number.isFinite).sort((a, b) => a - b);
+    const times = rows.map(r => new Date(r.sold_at).getTime()).filter(Number.isFinite).sort((x, y) => x - y);
     const oldest = times.length ? times[Math.floor(times.length * 0.05)] : null;
-    const days = oldest == null ? null : Math.floor((Date.now() - oldest) / 86400000);
+    const span = oldest == null ? null : Math.floor((nowMs - oldest) / 86400000);
     const since = oldest == null ? "" : shortDate(new Date(oldest).toISOString());
-    const cover = oldest == null ? "" : rows.length >= 50 && days < 90
-      ? `Die geladenen Verkäufe reichen nur bis ${since} zurück, ältere sind nicht geladen. „90 Tage“ umfasst hier also nur ${days} Tage.`
+    const cover = oldest == null ? "" : rows.length >= 50 && span < 90
+      ? `Die geladenen Verkäufe reichen nur bis ${since} zurück, ältere sind nicht geladen. „90 Tage“ umfasst hier also nur ${span} Tage.`
       : `Geladene Verkäufe seit ${since}.`;
     box.innerHTML = `
+      <p class="dsmall">${esc(head)}</p>
       <table class="ctab">
         <thead><tr><th scope="col">Zustand</th><th scope="col" class="num">Median</th><th scope="col" class="num">Grundlage</th></tr></thead>
         <tbody>${lines}</tbody>
       </table>
-      <p class="muted dsmall">Gleiche Sprache, Edition und Ausführung wie deine Karte, nur der Zustand wechselt. Grau: weniger als 3 Verkäufe.</p>
+      <p class="muted dsmall">Tippe auf einen Zustand, um die einzelnen Verkäufe mit Link zu eBay zu sehen. Gleiche Sprache, Edition und Ausführung wie deine Karte, nur der Zustand wechselt. Grau: weniger als 3 Verkäufe.</p>
       ${unknown ? `<p class="muted dsmall">${unknown} passende ${unknown === 1 ? "Verkauf lässt" : "Verkäufe lassen"} sich keinem Zustand zuordnen und ${unknown === 1 ? "fehlt" : "fehlen"} in der Tabelle.</p>` : ""}
       ${cover ? `<p class="muted dsmall">${esc(cover)}</p>` : ""}`;
   };
@@ -1636,11 +1657,24 @@ async function openDetail(id) {
     await saveValue(c);
   };
 
-  $("#sales", sheet).onclick = ev => {
+  const onSaleButton = ev => {
     const b = ev.target.closest("[data-x],[data-in]");
-    if (!b) return;
+    if (!b) return false;
     b.disabled = true;
     toggleSale(Number(b.dataset.x ?? b.dataset.in), b.dataset.x !== undefined);
+    return true;
+  };
+  $("#sales", sheet).onclick = onSaleButton;
+  $("#bycond", sheet).onclick = ev => {
+    if (onSaleButton(ev) || ev.target.closest("a")) return;
+    const t = ev.target.closest("[data-stage]");
+    if (!t || !lastRes) return;
+    const st = t.dataset.stage;
+    if (openStages.has(st)) openStages.delete(st); else openStages.add(st);
+    renderByCond(lastRes);
+    // Fokus nur nach Tastaturbedienung zurücksetzen (ev.detail ist dann 0), sonst bleibt nach einem Tipp ein Rahmen stehen
+    const btn = $(`#bycond .cbtn[data-stage="${st}"]`, sheet);
+    if (btn && ev.detail === 0) btn.focus({ preventScroll: true });
   };
 
   const loaded = await db.from("ebay_sales")
