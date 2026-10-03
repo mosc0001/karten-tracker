@@ -144,6 +144,13 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .dsmall{font-size:.85rem}
 .dstatswrap{grid-area:stats;min-width:0}
 .dstats{margin:0}
+.ctab{width:100%;border-collapse:collapse;font-size:.92rem;margin-top:4px}
+.ctab th,.ctab td{padding:9px 4px;border-top:1px solid var(--line);text-align:left;vertical-align:baseline;font-weight:400}
+.ctab thead th{border-top:0;color:var(--muted);font-size:.78rem;padding-top:0}
+.ctab td.num,.ctab th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ctab tbody th small{display:block;color:var(--muted);font-size:.76rem}
+.ctab tr.own th,.ctab tr.own td.price{font-weight:700}
+.ctab .own-mark{font-size:.72rem;padding:1px 6px;margin-left:4px;vertical-align:1px;white-space:nowrap;display:inline-block;font-weight:600}
 .drow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:.9rem}
 .drow dt{color:var(--muted)}
 .drow dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
@@ -1496,6 +1503,10 @@ async function openDetail(id) {
       <div class="dstatswrap" id="dstats">${statsHtml(c, e0)}</div>
     </div>
     <section class="dsec">
+      <h3>Preise nach Zustand</h3>
+      <div id="bycond"><p class="muted dsmall">Wird geladen …</p></div>
+    </section>
+    <section class="dsec">
       <h3>Verkäufe auf eBay</h3>
       <div id="sales"><p class="muted dsmall">Wird geladen …</p></div>
       <p class="err" id="smsg"></p>
@@ -1538,6 +1549,7 @@ async function openDetail(id) {
     const eNow = snap ? { unit: snap.price, n: snap.details.n, basis: snap.details.basis, tier: snap.details.tier, counts: snap.details.counts, d: snap.details } : null;
     $("#dvalue", sheet).innerHTML = valueBlockHtml(c, eNow);
     $("#dstats", sheet).innerHTML = statsHtml(c, eNow);
+    renderByCond(res);
 
     const head = res.tier === "none"
       ? `Kein passender Verkauf gefunden.${res.candidates ? ` ${res.candidates} Verkäufe wurden geprüft, passen aber nicht zu Zustand, Sprache, Ausführung oder Edition deiner Karte.` : ""}`
@@ -1574,6 +1586,40 @@ async function openDetail(id) {
       </details>` : ""}`;
   };
 
+  const STAGE_NAMES = { NM: "Near Mint or Better", LP: "Lightly Played", MP: "Moderately Played", HP: "Heavily Played" };
+  const renderByCond = res => {
+    const box = $("#bycond", sheet);
+    if (!box) return;
+    const lines = EBAY.STAGES.map(st => {
+      const r = st === c.condition ? res : compute({ ...c, condition: st });
+      const h = r.headline;
+      const own = st === c.condition;
+      const price = h ? `<span class="${h.n >= 3 ? "" : "prov"}">${eur(h.value)}</span>` : `<span class="muted">–</span>`;
+      const n = h ? `${h.n} ${h.n === 1 ? "Verkauf" : "Verkäufe"}, ${h.basis}${h.n >= 3 ? "" : ", vorläufig"}` : "kein Verkauf";
+      return `<tr class="${own ? "own" : ""}">
+        <th scope="row">${st}${own ? ` <span class="tag own-mark">deine Karte</span>` : ""}<small>${STAGE_NAMES[st]}</small></th>
+        <td class="num price">${price}</td>
+        <td class="num"><small>${n}</small></td></tr>`;
+    }).join("");
+    const unknown = res.rejected.filter(x => x.reason === "unknown_condition").length;
+    // Beginn des geladenen Zeitraums: einzelne sehr alte Verkäufe (Angebote mit mehreren Stück) zählen nicht
+    const times = rows.map(r => new Date(r.sold_at).getTime()).filter(Number.isFinite).sort((a, b) => a - b);
+    const oldest = times.length ? times[Math.floor(times.length * 0.05)] : null;
+    const days = oldest == null ? null : Math.floor((Date.now() - oldest) / 86400000);
+    const since = oldest == null ? "" : shortDate(new Date(oldest).toISOString());
+    const cover = oldest == null ? "" : rows.length >= 50 && days < 90
+      ? `Die geladenen Verkäufe reichen nur bis ${since} zurück, ältere sind nicht geladen. „90 Tage“ umfasst hier also nur ${days} Tage.`
+      : `Geladene Verkäufe seit ${since}.`;
+    box.innerHTML = `
+      <table class="ctab">
+        <thead><tr><th scope="col">Zustand</th><th scope="col" class="num">Median</th><th scope="col" class="num">Grundlage</th></tr></thead>
+        <tbody>${lines}</tbody>
+      </table>
+      <p class="muted dsmall">Gleiche Sprache, Edition und Ausführung wie deine Karte, nur der Zustand wechselt. Grau: weniger als 3 Verkäufe.</p>
+      ${unknown ? `<p class="muted dsmall">${unknown} passende ${unknown === 1 ? "Verkauf lässt" : "Verkäufe lassen"} sich keinem Zustand zuordnen und ${unknown === 1 ? "fehlt" : "fehlen"} in der Tabelle.</p>` : ""}
+      ${cover ? `<p class="muted dsmall">${esc(cover)}</p>` : ""}`;
+  };
+
   const saveValue = async card => {
     const hadValue = Boolean((state.latest[card.id] || {}).ebay_sold);
     await writeSnapshot(card, compute(card), hadValue);
@@ -1603,6 +1649,8 @@ async function openDetail(id) {
   if (loaded.error) {
     const box = $("#sales", sheet);
     if (box) box.innerHTML = `<p class="muted dsmall">${/ebay_sales|relation|does not exist|schema cache/i.test(loaded.error.message) ? esc(UPDATE5_MSG) : "Die Verkäufe konnten nicht geladen werden: " + esc(loaded.error.message)}</p>`;
+    const bc = $("#bycond", sheet);
+    if (bc) bc.innerHTML = `<p class="muted dsmall">Ohne geladene Verkäufe gibt es keine Preise nach Zustand.</p>`;
   } else {
     rows = loaded.data || [];
     renderSales();
