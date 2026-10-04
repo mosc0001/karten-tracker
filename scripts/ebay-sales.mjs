@@ -39,6 +39,22 @@ const log = (...a) => console.log(...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const round2 = (n) => Math.round(n * 100) / 100;
 
+// Statusmeldung für die App (Tabelle app_status, ab update6.sql).
+// Ein Fehler hier darf den Job nie stoppen: Ohne Tabelle wird nur ein Hinweis protokolliert.
+async function writeStatus(patch) {
+  try {
+    const old = await sb("app_status?select=value&key=eq.ebay_job");
+    const prev = (old && old[0] && old[0].value) || {};
+    await sb("app_status?on_conflict=key", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify([{ key: "ebay_job", value: { ...prev, ...patch }, updated_at: new Date().toISOString() }]),
+    });
+  } catch (e) {
+    log("Hinweis: Status für die App nicht gespeichert (update6.sql ausgeführt?): " + String(e.message).slice(0, 160));
+  }
+}
+
 if (!CFG.supabaseUrl || !CFG.supabaseKey) {
   console.error("SUPABASE_URL oder SUPABASE_SECRET_KEY fehlt (GitHub Secrets prüfen).");
   process.exit(1);
@@ -166,8 +182,7 @@ async function main() {
   try {
     runsThisMonth = await sb(`ebay_runs?select=est_cost_usd,apify_cost_usd&started_at=gte.${monthStart}`);
   } catch (e) {
-    console.error("Tabelle ebay_runs nicht lesbar. Wurde update5.sql in Supabase ausgeführt?\n" + e.message);
-    process.exit(1);
+    throw new Error("Tabelle ebay_runs nicht lesbar. Wurde update5.sql in Supabase ausgeführt? " + e.message);
   }
   const spent = runsThisMonth.reduce((s, r) => s + Math.max(Number(r.est_cost_usd || 0), Number(r.apify_cost_usd || 0)), 0);
   const available = Math.max(0, Math.min(CFG.runBudget, CFG.monthBudget - spent));
@@ -177,6 +192,8 @@ async function main() {
   const estUpdate = COST.searchUrl + CFG.updateRows * COST.searchRow + 0.25 * CFG.updateRows * COST.detailPage;
   let budget = available - 2 * COST.searchRun - COST.detailRun;
   const backfill = [], update = [];
+  const isDue = (c, i) => !c.ebay_checked_at || now - new Date(c.ebay_checked_at) > (i < CFG.topN ? CFG.topEveryDays : CFG.restEveryDays) * DAY;
+  const dueTotal = ranked.filter(isDue).length;
   if (CFG.apifyToken && budget > 0) {
     ranked.forEach((c, i) => {
       const every = i < CFG.topN ? CFG.topEveryDays : CFG.restEveryDays;
@@ -356,7 +373,29 @@ async function main() {
     });
   }
   log(`Geschätzte Kosten dieses Durchlaufs: ${est.toFixed(2)} $${stats.apifyUsdKnown ? `, laut Apify ${stats.apifyUsd.toFixed(3)} $` : ""}.`);
-  if (stats.failed && !stats.ok) process.exit(1);
+  const done = new Set(processed.map((c) => c.id));
+  const hardFail = Boolean(stats.failed && !stats.ok);
+  await writeStatus({
+    at: new Date().toISOString(),
+    ok: !hardFail,
+    partial: stats.failed > 0 && !hardFail,
+    message: stats.failed ? `${stats.failed} Apify-Lauf/Läufe fehlgeschlagen` : null,
+    loaded: backfill.length,
+    updated: update.length,
+    waiting: Math.max(0, dueTotal - backfill.length - update.length),
+    neverLoaded: cards.filter((c) => !c.ebay_checked_at && !done.has(c.id)).length,
+    monthSpent: round2(spent + est),
+    monthBudget: CFG.monthBudget,
+    month: monthStart.slice(0, 7),
+    tokenMissing: !CFG.apifyToken,
+    withValue, counted,
+    ...(hardFail ? {} : { lastSuccessAt: new Date().toISOString() }),
+  });
+  if (hardFail) process.exit(1);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch(async (e) => {
+  console.error(e);
+  await writeStatus({ at: new Date().toISOString(), ok: false, partial: false, message: String((e && e.message) || e).slice(0, 300) });
+  process.exit(1);
+});
