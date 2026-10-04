@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # nur für das Lebenszeichen (leerer Commit), siehe letzter Schritt
 
 concurrency:
   group: ebay-sales
@@ -30,9 +30,26 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           # Kostenbremse in Dollar (Schätzung). Hier kannst du die Werte ändern.
-          EBAY_MONTH_BUDGET_USD: "18.0"
-          EBAY_RUN_BUDGET_USD: "4.0"
+          EBAY_MONTH_BUDGET_USD: "4.0"
+          EBAY_RUN_BUDGET_USD: "1.2"
           # die wertvollsten Karten wöchentlich, alle übrigen alle 28 Tage
           EBAY_TOP_N: "15"
           EBAY_TOP_EVERY_DAYS: "7"
           EBAY_REST_EVERY_DAYS: "28"
+
+      # GitHub schaltet zeitgesteuerte Workflows in öffentlichen Repositories ab,
+      # wenn 60 Tage lang nichts im Repository passiert. Liegt der letzte Commit
+      # 40 Tage oder länger zurück, legt dieser Schritt einen leeren Commit an.
+      # Er ändert keine Datei und löst keine Veröffentlichung der App aus.
+      - name: Lebenszeichen (verhindert Abschalten nach 60 Tagen)
+        if: always()
+        run: |
+          last=$(git log -1 --format=%ct)
+          days=$(( ( $(date +%s) - last ) / 86400 ))
+          echo "Letzter Commit vor $days Tagen."
+          if [ "$days" -ge 40 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Lebenszeichen: Nachtjob aktiv halten"
+            git push || echo "Push nicht möglich, nächster Versuch morgen."
+          fi
