@@ -367,11 +367,41 @@ export function matchCard(card, sales, opts = {}) {
 
 // Suchbegriff für eBay: Name und Set, bewertete Karten und Sammelangebote werden schon bei eBay ausgeschlossen.
 // Jede zurückgelieferte Zeile kostet Geld, deshalb lieber vorher aussortieren.
+// Begriffe, die Verkäufer für die alten Sets tatsächlich in den Titel schreiben (deutsch und englisch).
+// Schlüssel ist die TCGdex-Set-Kennung, sie ist in allen Sprachen gleich. Der TCGdex-Setname passt oft nicht
+// zum Sprachgebrauch auf eBay (z. B. "Grundset" statt "Base Set", "Expedition Base Set" statt "Expedition").
+// Mehrere Begriffe werden mit eBays Oder-Schreibweise verbunden: (A,B,C) = A oder B oder C im Titel.
+export const SET_TERMS = {
+  base1: ["Base", "Basis", "Grundset", "Basisset"],
+  base2: ["Jungle", "Dschungel"],
+  base3: ["Fossil"],
+  base5: ["Rocket"],
+  neo1: ["Genesis"],
+  neo2: ["Discovery"],
+  neo3: ["Revelation"],
+  neo4: ["Destiny"],
+  lc: ["Legendary"],
+  ecard1: ["Expedition"],
+  ecard2: ["Aquapolis"],
+  ecard3: ["Skyridge"],
+};
+
+export function setIdOf(c) {
+  return (c.tcg_meta && c.tcg_meta.setId) || (c.tcgdex_id ? String(c.tcgdex_id).replace(/-[^-]+$/, "") : null);
+}
+
 export function buildQuery(card) {
+  const terms = card.setId && SET_TERMS[card.setId];
+  const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : card.setName;
   // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
-  const base = [card.name, card.setName, card.finish === "reverse_holo" ? "reverse" : ""].filter(Boolean).join(" ");
+  const base = [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : ""].filter(Boolean).join(" ");
   return base + " -PSA -BGS -CGC -GSG -SGC -Beckett -graded -bewertet -slab -lot -bundle";
 }
+
+// Vergleichsschlüssel für Suchbegriffe: Groß-/Kleinschreibung, Klammern, Kommas und Reihenfolge spielen keine Rolle.
+// So werden Ergebnisse auch dann der richtigen Karte zugeordnet, wenn eBay den Suchbegriff leicht umformatiert zurückgibt.
+export const queryKey = (q) => String(q || "").toLowerCase().replace(/[(),]/g, " ").split(/\s+/)
+  .filter((t) => t && !t.startsWith("-")).sort().join(" ");
 
 /* ========================================================================
    Funktionen für den Nachtjob und die App
