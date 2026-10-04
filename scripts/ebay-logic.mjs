@@ -98,6 +98,14 @@ function parseSoldAt(row, detail) {
   return null;
 }
 
+// Vorschaubild des Angebots (bleibt sichtbar, auch wenn das Angebot bei eBay verschwunden ist)
+const EBAY_IMG = /^https:\/\/i\.ebayimg\.com\/[^\s"'<>]+$/;
+function pickImage(row, detail) {
+  const cands = [row && row.image, detail && Array.isArray(detail.images) && detail.images[0], detail && detail.image];
+  for (const c of cands) if (typeof c === "string" && EBAY_IMG.test(c)) return c;
+  return null;
+}
+
 /* ========================================================================
    parseSale: aus einer Suchzeile (und, falls vorhanden, der Artikelseite) die Merkmale lesen
    ======================================================================== */
@@ -185,6 +193,7 @@ export function parseSale(row, detail = null) {
     graded, gradedReason,
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
     stage, stageSource, language, edition, variant, reprint, finish, conflicts,
+    image: pickImage(row, detail),
   };
 }
 
@@ -408,7 +417,7 @@ export function saleFromDb(r) {
 // Suchzeile einer gespeicherten Zeile rekonstruieren (für nachträgliche Detailseiten)
 export function rowFromDb(r) {
   const raw = (r.parsed && r.parsed.raw) || {};
-  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted };
+  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted, image: (r.parsed && r.parsed.image) || null };
 }
 
 // Vorauswahl: lohnt sich eine Detailseite (kostet Geld)?  "drop" = nicht zur Karte, "ok" = reicht, "detail" = Detailseite holen
