@@ -190,7 +190,8 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .dactions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
 .dangerlink{background:none;border:0;padding:8px 0;color:var(--danger);text-decoration:underline;text-underline-offset:2px}
 .prov{color:var(--muted);font-weight:500}
-.provtoggle{margin:6px 0 2px;font-size:.9rem}
+.totseg{display:inline-flex;margin:4px 0 6px}
+.totseg button{flex:none;padding:6px 12px;font-size:.85rem}
 .dprice.prov{color:var(--muted)}
 .menu a{display:block;padding:10px 12px;border-radius:8px;color:inherit;text-decoration:none}
 .menu a:hover,.menu a:focus-visible{background:var(--bg)}
@@ -1174,6 +1175,7 @@ function renderMain() {
   // Vorläufige Werte (1-2 Verkäufe): zählen nie in der Hauptsumme, auf Wunsch als zweite Zeile
   const provRows = all.filter(r => !r.counted && r.total != null);
   const provSum = provRows.reduce((s, r) => s + r.total, 0);
+  const withProv = state.withProv && provRows.length > 0;
   const qty = state.cards.reduce((s, c) => s + c.quantity, 0);
   const dates = Object.values(state.latest).map(o => o.ebay_sold).filter(Boolean).map(r => r.captured_on).sort();
   const last = dates.length ? dates[dates.length - 1] : "";
@@ -1235,11 +1237,14 @@ function renderMain() {
       ${jobStatus().banners}
       <section class="sleeve">
         <div>
-          <p class="total">${eur(sum)}</p>
+          ${provRows.length ? `<div class="seg totseg" role="group" aria-label="Gesamtwert berechnen">
+            <button data-prov="0" class="${state.withProv ? "" : "on"}" aria-pressed="${!state.withProv}">Belastbar</button>
+            <button data-prov="1" class="${state.withProv ? "on" : ""}" aria-pressed="${state.withProv}">Mit vorläufigen</button>
+          </div>` : ""}
+          <p class="total">${eur(withProv ? sum + provSum : sum)}</p>
+          ${withProv ? `<p class="sub" id="provsum">inklusive ${provRows.length} ${provRows.length === 1 ? "vorläufigem Wert" : "vorläufiger Werte"} mit 1 bis 2 Verkäufen (+${eur(provSum)}, weniger belastbar)</p>` : ""}
           <p class="sub">${qty} ${qty === 1 ? "Karte" : "Karten"}, ${countedRows.length} von ${all.length} Einträgen mit Wert aus mindestens 3 eBay-Verkäufen${last ? ", Stand " + fmtDate(last) : ""}</p>
           ${g ? `<p class="sub">Gewinn/Verlust zum Kaufpreis: <span class="${trendCls(g.gain)}">${signedEur(g.gain)}${g.pct != null ? ` (${fmtPct(g.pct)})` : ""}</span>, ${g.n} ${g.n === 1 ? "Karte" : "Karten"} mit Kaufpreis</p>` : ""}
-          ${provRows.length ? `<label class="toggle provtoggle"><input id="provtoggle" type="checkbox"${state.withProv ? " checked" : ""}> Vorläufige Werte einrechnen</label>
-          ${state.withProv ? `<p class="sub" id="provsum">Mit vorläufigen Werten: <b>${eur(sum + provSum)}</b> (+${eur(provSum)} aus ${provRows.length} ${provRows.length === 1 ? "Eintrag" : "Einträgen"} mit 1 bis 2 Verkäufen, weniger belastbar)</p>` : ""}` : ""}
           ${jobStatus().line}
           ${missing ? `<button class="linkish" id="showmissing">${missing} ${missing === 1 ? "Eintrag" : "Einträge"} ohne belastbaren Wert anzeigen</button>` : ""}
         </div>
@@ -1252,12 +1257,13 @@ function renderMain() {
     <button id="add" class="primary fab">Karte hinzufügen</button>`;
 
   $("#add").onclick = openAdd;
-  const pt = $("#provtoggle");
-  if (pt) pt.onchange = () => {
-    state.withProv = pt.checked;
-    try { localStorage.setItem("kt_prov", state.withProv ? "1" : "0"); } catch (e) { /* nicht gespeichert */ }
+  document.querySelectorAll(".totseg button").forEach(b => b.onclick = () => {
+    const on = b.dataset.prov === "1";
+    if (on === state.withProv) return;
+    state.withProv = on;
+    try { localStorage.setItem("kt_prov", on ? "1" : "0"); } catch (e) { /* nicht gespeichert */ }
     renderMain();
-  };
+  });
   $("#addtop").onclick = openAdd;
   $("#logout").onclick = () => db.auth.signOut();
   const mb = $("#menubtn"), menu = $("#menu");
