@@ -169,6 +169,9 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .dsec h3{font-size:.95rem;margin-bottom:6px}
 .dsec .hist{margin:0}
 .dform{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}
+.banner.bad{border-color:var(--danger)}
+.banner a{color:inherit;font-weight:600}
+.jobline{font-size:.82rem}
 .banner,.hintbox{margin:0 0 12px;padding:10px 12px;border:1px solid var(--accent);border-radius:10px;font-size:.9rem}
 .hintbox{margin:4px 0 10px}
 .dform label{margin-top:0}
@@ -791,10 +794,11 @@ function renderLogin(msg = "") {
 
 async function loadMain(opts = {}) {
   if (!opts.quiet) $("#app").innerHTML = `<p class="muted pad">Sammlung wird geladen …</p>`;
-  const [c, l, d] = await Promise.all([
+  const [c, l, d, js] = await Promise.all([
     db.from("cards").select("*").order("created_at", { ascending: false }),
     db.from("card_latest_prices").select("*"),
-    db.from("collection_value_daily").select("captured_on,value_eur").order("captured_on", { ascending: true }).limit(400)
+    db.from("collection_value_daily").select("captured_on,value_eur").order("captured_on", { ascending: true }).limit(400),
+    db.from("app_status").select("key,value,updated_at").eq("key", "ebay_job")
   ]);
   const err = c.error || l.error;
   if (err) {
@@ -809,11 +813,57 @@ async function loadMain(opts = {}) {
   }
   // Ohne update2.sql gibt es die Ansicht nicht: Kurve dann ausblenden, Rest läuft normal.
   state.daily = d.error ? null : (d.data || []);
+  // Status des Nachtjobs (ab update6.sql). Fehlt die Tabelle, zeigt die App einen Hinweis.
+  state.job = js.error
+    ? (/app_status|relation|does not exist|schema cache|could not find/i.test(js.error.message) ? { missing: true } : null)
+    : ((js.data && js.data[0] && js.data[0].value) || null);
   const y = window.scrollY;
   renderMain();
   if (opts.quiet) window.scrollTo(0, y);
   repairImages();
   loadSetYears();
+}
+
+const JOB_URL = "https://github.com/mosc0001/karten-tracker/actions/workflows/ebay.yml";
+const usd = v => Number(v || 0).toLocaleString("de-DE", { style: "currency", currency: "USD" });
+function whenText(iso) {
+  const d = new Date(iso), now = new Date();
+  const t = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400000);
+  return diff === 0 ? `heute ${t}` : diff === 1 ? `gestern ${t}` : `am ${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${t}`;
+}
+// Liefert Hinweise (oben) und eine Statuszeile (im Kopfbereich) zum Nachtjob
+function jobStatus() {
+  const j = state.job;
+  if (needsUpdate5()) return { banners: "", line: "" };
+  if (j && j.missing) return { banners: `<p class="banner" role="note">Bitte update6.sql in Supabase ausführen, damit die App den Status des Nachtjobs anzeigt.</p>`, line: "" };
+  if (!j || !j.at) return { banners: "", line: `<p class="sub jobline">Nachtjob: Der Status erscheint nach dem nächsten Lauf.</p>` };
+  const link = txt => `<a href="${JOB_URL}" target="_blank" rel="noopener">${txt}</a>`;
+  const notes = [];
+  const hours = (Date.now() - new Date(j.at).getTime()) / 3600000;
+  if (hours > 50) notes.push(["bad", `Der Nachtjob ist seit ${Math.floor(hours / 24)} Tagen nicht gelaufen, die Preise werden nicht mehr aktualisiert. ${link("In GitHub prüfen")}`]);
+  if (j.ok === false) notes.push(["bad", `Der letzte Lauf des Nachtjobs ist fehlgeschlagen: ${esc(j.message || "unbekannter Fehler")} ${link("Protokoll ansehen")}`]);
+  else if (j.partial) notes.push(["", `Beim letzten Lauf ist ein Teil der eBay-Abfragen fehlgeschlagen (${esc(j.message || "")}). Die betroffenen Karten kommen beim nächsten Lauf erneut dran.`]);
+  if (j.tokenMissing) notes.push(["bad", `Dem Nachtjob fehlt der Apify-Schlüssel (GitHub-Secret APIFY_TOKEN). Er rechnet nur noch mit den vorhandenen Verkäufen.`]);
+  const now = new Date();
+  const thisMonth = now.toISOString().slice(0, 7);
+  const sameMonth = j.month === thisMonth;
+  const spent = sameMonth ? Number(j.monthSpent || 0) : 0;
+  const budget = Number(j.monthBudget || 0);
+  const budgetOut = sameMonth && j.waiting > 0 && budget - spent < 0.35;
+  if (budgetOut) {
+    const next = new Date(now.getFullYear(), now.getMonth() + 1, 1).toLocaleDateString("de-DE", { month: "long" });
+    notes.push(["", `Monatsbudget erreicht (${usd(spent)} von ${usd(budget)}): ${j.waiting} fällige ${j.waiting === 1 ? "Karte wartet" : "Karten warten"} bis zum 1. ${next}. Mehr Budget: EBAY_MONTH_BUDGET_USD in ebay.yml.`]);
+  }
+  const open = state.cards.filter(c => !c.ebay_checked_at).length;
+  const parts = [`Nachtjob: zuletzt ${whenText(j.at)}${j.ok === false ? " (fehlgeschlagen)" : ""}`,
+    `${now.toLocaleDateString("de-DE", { month: "long" })}: ${usd(spent)} von ${usd(budget)} (geschätzt)`];
+  if (open) parts.push(`${open} ${open === 1 ? "Karte" : "Karten"} noch ohne eBay-Abfrage`);
+  return {
+    banners: notes.map(([cls, txt]) => `<p class="banner${cls ? " " + cls : ""}" role="${cls ? "alert" : "note"}">${txt}</p>`).join(""),
+    line: `<p class="sub jobline">${parts.join(" · ")}</p>`
+  };
 }
 
 const SORTS = [["value", "Sortieren: Wert"], ["name", "Sortieren: Name"], ["newest", "Sortieren: Neueste"]];
@@ -1097,11 +1147,13 @@ function renderMain() {
       <p id="status" class="status" role="status"></p>
       ${needsUpdate4() ? `<p class="banner" role="note">Bitte update4.sql in Supabase ausführen. Danach nutzt die App die eBay-Zustände (NM, LP, MP, HP) und die Ausführung Non-Holo, Holo oder Reverse Holo. Bis dahin ist Speichern gesperrt, damit nichts falsch umgeschlüsselt wird.</p>` : ""}
       ${needsUpdate5() ? `<p class="banner" role="note">Bitte update5.sql in Supabase ausführen und die neuen Dateien (ebay-logic.mjs, ebay-sales.mjs, ebay.yml) ins Repository legen. Erst dann entstehen eBay-Werte.</p>` : ""}
+      ${jobStatus().banners}
       <section class="sleeve">
         <div>
           <p class="total">${eur(sum)}</p>
           <p class="sub">${qty} ${qty === 1 ? "Karte" : "Karten"}, ${countedRows.length} von ${all.length} Einträgen mit Wert aus mindestens 3 eBay-Verkäufen${last ? ", Stand " + fmtDate(last) : ""}</p>
           ${g ? `<p class="sub">Gewinn/Verlust zum Kaufpreis: <span class="${trendCls(g.gain)}">${signedEur(g.gain)}${g.pct != null ? ` (${fmtPct(g.pct)})` : ""}</span>, ${g.n} ${g.n === 1 ? "Karte" : "Karten"} mit Kaufpreis</p>` : ""}
+          ${jobStatus().line}
           ${missing ? `<button class="linkish" id="showmissing">${missing} ${missing === 1 ? "Eintrag" : "Einträge"} ohne belastbaren Wert anzeigen</button>` : ""}
         </div>
         <div class="spark">${totalChart()}</div>
