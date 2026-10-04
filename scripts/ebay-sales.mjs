@@ -125,7 +125,7 @@ async function runActor(input, label, capUsd) {
 const proxy = { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "DE" };
 const searchUrl = (q) => `https://www.ebay.de/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13`;
 const qKey = (q) => String(q).toLowerCase().split(/\s+/).filter((t) => t && !t.startsWith("-")).join(" ");
-const queryOf = (card) => (card.ebay_query && card.ebay_query.trim()) || buildQuery({ name: card.name, setName: card.set_name });
+const queryOf = (card) => (card.ebay_query && card.ebay_query.trim()) || buildQuery({ name: card.name, setName: card.set_name, finish: card.finish || (card.foil ? "holo" : "non_holo") });
 
 function rowQuery(r) {
   const skw = (r.basic_info && r.basic_info.skw) || null;
