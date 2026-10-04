@@ -36,7 +36,7 @@ const CFG = {
 };
 
 // Kosten in Dollar, aus den Testläufen geschätzt (siehe Anleitung)
-const COST = { searchRun: 0.01, searchUrl: 0.016, searchRow: 0.0031, detailRun: 0.027, detailPage: 0.0045 };
+const COST = { searchRun: 0.01, searchUrl: 0.016, searchRow: 0.0031, detailRun: 0.027, detailPage: 0.005 }; // detailPage nach echtem Lauf (300 Seiten = 1,52 $) angehoben
 
 const log = (...a) => console.log(...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
