@@ -197,6 +197,10 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .sale.hasimg .stl{grid-column:2 / 4}
 details.more{margin-top:12px;font-size:.85rem;color:var(--muted)}
 details.more summary{cursor:pointer;padding:4px 0}
+details.more .sales{color:var(--ink);padding-left:0;margin:4px 0 0;font-size:1rem}
+details.rgrp{margin:4px 0 0 2px}
+details.rgrp>summary{cursor:pointer;padding:7px 0;color:var(--ink);font-size:.9rem}
+details.rgrp>p{margin:2px 0 4px}
 details.more ul{margin:6px 0 0;padding-left:18px}
 .fwide{grid-column:1/-1}
 .plines{list-style:none;padding:0;margin:12px 0 0}
@@ -1570,6 +1574,25 @@ const EXCL_LABELS = {
   other_currency: "andere Währung", duplicate: "doppelte Einträge", no_date: "ohne Datum"
 };
 const MISM_LABELS = { language: "andere Sprache", edition: "andere Edition", finish: "andere Ausführung", condition: "anderer Zustand", reverse_unproven: "Reverse nicht belegt (weder im Titel noch im Merkmal)" };
+const REJECT_REASONS = [
+  ["language", "Andere Sprache", ""],
+  ["edition", "Andere Edition", ""],
+  ["finish", "Andere Ausführung", ""],
+  ["reverse_unproven", "Reverse nicht belegt", "Weder Titel noch Merkmal nennen Reverse Holo. Ohne Angabe sind es meist normale Karten."],
+  ["unknown_condition", "Zustand nicht erkennbar", "Weder Titel noch Merkmal nennen einen Zustand. Mit einer Detailseite lässt sich das bei einer späteren Abfrage oft noch klären."],
+  ["unknown_language", "Sprache nicht erkennbar", ""],
+  ["unknown_edition", "1st Edition nicht belegt", "Deine Karte ist eine 1st Edition, der Verkauf nennt sie nicht."],
+  ["unknown_finish", "Ausführung nicht erkennbar", ""],
+  ["graded", "Bewertete Karte (PSA, BGS …)", ""],
+  ["multi", "Sammelangebot oder mehrere Karten", ""],
+  ["variant", "Anderer Druck (z. B. 4th Print, Shadowless)", ""],
+  ["reprint", "Neuauflage (z. B. Celebrations)", ""],
+  ["conflict", "Widersprüchliche Angaben im Angebot", "Titel und Merkmale widersprechen sich, z. B. bei Zustand oder Edition."],
+  ["irrelevant", "Andere Karte oder Nummer", "Der Titel nennt eine andere Kartennummer oder nicht diese Karte."],
+  ["old", "Älter als 12 Monate", ""],
+  ["other_currency", "Andere Währung", ""],
+  ["no_date", "Ohne Verkaufsdatum", ""],
+];
 const FIN_LABEL = { holo: "Holo", reverse_holo: "Reverse", non_holo: "Non-Holo" };
 const shortDate = iso => new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
 
@@ -1700,6 +1723,14 @@ async function openDetail(id) {
       <button class="ghost sx" data-x="${s._id}">Ausschließen</button>
     </li>`;
 
+  const saleLiPlain = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
+      ${saleImgHtml(s.image)}
+      <span class="sd">${shortDate(s.soldAt)}</span>
+      <span class="st">${saleTags(s)}</span>
+      <span class="sp">${eur(s.price)}${s.priceUncertain ? `<small>Preisvorschlag</small>` : ""}</span>
+      <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
+    </li>`;
+
   const renderSales = () => {
     if (!rows) return;
     const res = compute(c);
@@ -1713,22 +1744,35 @@ async function openDetail(id) {
     const box = $("#sales", sheet);
     if (!box) return;
     const userEx = rows.filter(r => r.excluded);
-    const mismTotal = Object.values(res.mismatched).reduce((x, y) => x + y, 0);
-    const open = Math.max(0, res.candidates - res.relaxedN - mismTotal);
-    const bits = [
-      ...Object.entries(res.excluded).filter(([k, v]) => v && EXCL_LABELS[k]).map(([k, v]) => `${EXCL_LABELS[k]}: ${v}`),
-      ...Object.entries(res.mismatched).filter(([k, v]) => v && k !== "condition").map(([k, v]) => `${MISM_LABELS[k]}: ${v}`),
-      ...(open ? [`offene Angaben (Zustand oder Sprache nicht erkennbar): ${open}`] : []),
-    ];
+    // Aussortierte Verkäufe einzeln anzeigen, nach Grund gruppiert. Verkäufe in anderen Zuständen stehen oben in der Tabelle.
+    const groups = new Map();
+    for (const { sale, reason } of res.rejected) {
+      if (reason === "condition") continue;
+      if (!groups.has(reason)) groups.set(reason, []);
+      groups.get(reason).push(sale);
+    }
+    const known = REJECT_REASONS.map(([k]) => k);
+    const order = [...known.filter(k => groups.has(k)), ...[...groups.keys()].filter(k => !known.includes(k))];
+    const total = order.reduce((n, k) => n + groups.get(k).length, 0);
+    const groupHtml = order.map(k => {
+      const [, label, hint] = REJECT_REASONS.find(([x]) => x === k) || [k, k, ""];
+      const list = groups.get(k).sort((x, y) => new Date(y.soldAt) - new Date(x.soldAt));
+      return `<details class="rgrp" data-reason="${esc(k)}"><summary>${esc(label)} (${list.length})</summary>
+        ${hint ? `<p class="muted dsmall">${esc(hint)}</p>` : ""}
+        <ul class="sales">${list.slice(0, 60).map(saleLiPlain).join("")}</ul>
+        ${list.length > 60 ? `<p class="muted dsmall">und ${list.length - 60} weitere</p>` : ""}
+      </details>`;
+    }).join("");
     box.innerHTML = `
-      ${bits.length ? `<details class="more"><summary>Nicht berücksichtigt (${bits.length} ${bits.length === 1 ? "Grund" : "Gründe"})</summary>
-        <ul>${bits.map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}
+      ${total ? `<details class="more"><summary>Nicht berücksichtigt (${total} ${total === 1 ? "Verkauf" : "Verkäufe"})</summary>
+        <p class="muted dsmall">Nach Grund gruppiert. Verkäufe in anderen Zuständen stehen oben in der Tabelle.</p>
+        ${groupHtml}</details>` : ""}
       ${userEx.length ? `<p class="dsmall">Von dir ausgeschlossen:</p><ul class="sales">${userEx.map(r => { const im = r.parsed && r.parsed.image; return `<li class="sale${ebayImg(im, 225) ? " hasimg" : ""}">
         ${saleImgHtml(im)}
         <span class="sd">${shortDate(r.sold_at)}</span><span class="st"></span><span class="sp">${eur(Number(r.price_eur))}</span>
         <a class="stl" href="${esc(ebayItemUrl(r.item_id, r.url))}" target="_blank" rel="noopener" title="${esc(r.title)}">${esc(r.title)}</a>
         <button class="ghost sx" data-in="${r.id}">Wieder einbeziehen</button></li>`; }).join("")}</ul>` : ""}
-      ${!bits.length && !userEx.length ? `<p class="muted dsmall">Nichts aussortiert.</p>` : ""}`;
+      ${!total && !userEx.length ? `<p class="muted dsmall">Nichts aussortiert.</p>` : ""}`;
   };
 
   const renderByCond = res => {
@@ -1805,7 +1849,8 @@ async function openDetail(id) {
     toggleSale(Number(b.dataset.x ?? b.dataset.in), b.dataset.x !== undefined);
     return true;
   };
-  $("#sales", sheet).onclick = onSaleButton;
+  // Nicht direkt onSaleButton zuweisen: dessen Rückgabe "false" würde jeden anderen Klick (Dropdown, Links) blockieren
+  $("#sales", sheet).onclick = ev => { onSaleButton(ev); };
   $("#bycond", sheet).onclick = ev => {
     if (onSaleButton(ev) || ev.target.closest("a")) return;
     const t = ev.target.closest("[data-stage]");
