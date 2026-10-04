@@ -317,10 +317,11 @@ function langFromTitle(title) {
 const FIRST_RX = /\b1st\b|\b1\.? ?edition\b|first edition|erstausgabe|erstauflage|prima edizione|\b1 ?edizione|edizione 1|\b1(e|ere) edition|premiere edition|primera edicion|1a edizione/;
 const UNLIMITED_RX = /\bunlimited\b|unlimitiert/;
 
-function finishFromText(s) {
+function finishFromText(s, isField = false) {
   const t = norm(s);
-  if (/reverse|umgekehrt|rev\.? ?holo/.test(t)) return "reverse_holo";
-  if (/non[- ]?holo|nicht holo|no holo|ohne holo|non foil|non olograf/.test(t)) return "non_holo";
+  if (/reverse|\brevers\b|umgekehrt|\brev\.? ?holo|\brh\b|rev[- ]?foil/.test(t)) return "reverse_holo";
+  if (/non[- ]?holo|nicht holo|no holo|ohne holo|non[- ]?foil|non olograf/.test(t)) return "non_holo";
+  if (isField && /\b(regular|normal|standard)\b/.test(t)) return "non_holo";
   if (/\bholo(foil)?\b|olograf|holographic|\bfoil\b/.test(t)) return "holo";
   return null;
 }
@@ -405,7 +406,7 @@ function parseSale(row, detail = null) {
 
   // Ausführung
   const finishField = spec(sp, K.finish);
-  let finish = finishField ? finishFromText(finishField) : null;
+  let finish = finishField ? finishFromText(finishField, true) : null;
   if (!finish) finish = finishFromText(featureText);
   if (!finish) finish = finishFromText(title);
 
@@ -443,16 +444,20 @@ function parseNumber(n) {
   return m ? { prefix: m[1].toLowerCase(), num: Number(m[2]) } : { prefix: "", num: NaN };
 }
 
+const numberTokens = (title) => [...norm(title).matchAll(/\b([a-z]{0,5})0*(\d{1,3})\s*\/\s*([a-z]{0,5})0*(\d{1,3})\b/g)]
+  .map((m) => ({ pre: m[1], num: Number(m[2]), den: Number(m[4]) }));
+const ownNumberIn = (card, toks) => {
+  const want = parseNumber(card.number);
+  return toks.some((k) => k.pre === want.prefix && k.num === want.num &&
+    (want.prefix || !card.setTotal || k.den === Number(card.setTotal)));
+};
+
 // Gehört der Verkauf zu genau dieser Karte? Nummern mit Buchstaben (H3/H32) sind eine andere Karte als 3/147.
 function relevant(card, sale) {
   const t = norm(sale.title);
   const want = parseNumber(card.number);
-  const toks = [...t.matchAll(/\b([a-z]{0,5})0*(\d{1,3})\s*\/\s*([a-z]{0,5})0*(\d{1,3})\b/g)]
-    .map((m) => ({ pre: m[1], num: Number(m[2]), den: Number(m[4]) }));
-  if (toks.length) {
-    return toks.some((k) => k.pre === want.prefix && k.num === want.num &&
-      (want.prefix || !card.setTotal || k.den === Number(card.setTotal)));
-  }
+  const toks = numberTokens(sale.title);
+  if (toks.length) return ownNumberIn(card, toks);
   // ohne "x/y": Buchstaben-Nummern wie "H29" allein im Titel
   const lone = [...t.matchAll(/\b([a-z]{1,5})\s?0*(\d{1,3})\b/g)].filter((m) => m[1] === want.prefix || (!want.prefix && m[1] === "h"));
   if (want.prefix) {
@@ -475,6 +480,16 @@ function onlyFinish(card) {
   return f.length === 1 ? f[0] : null;
 }
 
+// Welche Ausführung zählt? Bei Reverse-Karten, die es unter dieser Nummer nicht als echte Holo gibt
+// (z. B. Expedition 33-64), meint "Holo" im Titel oft die Reverse-Version. Das wird nur gewertet, wenn der Titel
+// die eigene Kartennummer nennt: Ohne Nummer kann die echte Holo-Karte (andere Nummer, teurer) gemeint sein.
+function effectiveFinish(card, sale) {
+  if (sale.finish !== "holo" || card.finish !== "reverse_holo") return sale.finish || null;
+  const v = card.variants;
+  if (!v || v.holo !== false) return sale.finish;
+  return ownNumberIn(card, numberTokens(sale.title)) ? "reverse_holo" : sale.finish;
+}
+
 function check(card, sale) {
   const r = {};
   // Sprache
@@ -486,9 +501,12 @@ function check(card, sale) {
   // Edition
   if (card.firstEdition) r.edition = sale.edition === "1st" ? "match" : sale.edition === "unlimited" ? "mismatch" : "unknown";
   else r.edition = sale.edition === "1st" ? "mismatch" : "match";
-  // Ausführung
+  // Ausführung. Reverse muss belegt sein (wie die 1st Edition): Ohne Angabe zählt ein Verkauf nicht,
+  // denn wer eine Reverse Holo verkauft, schreibt das fast immer dazu. Bei normalen Karten gilt "ohne Angabe" als normal.
   const only = onlyFinish(card);
-  if (sale.finish) r.finish = sale.finish === card.finish ? "match" : "mismatch";
+  const fin = effectiveFinish(card, sale);
+  if (card.finish === "reverse_holo") r.finish = fin === "reverse_holo" ? "match" : fin ? "mismatch" : "unproven";
+  else if (fin) r.finish = fin === card.finish ? "match" : "mismatch";
   else r.finish = only && only === card.finish ? "match" : "unknown";
   // Zustand
   r.condition = sale.stage ? (sale.stage === card.condition ? "match" : "mismatch") : "unknown";
@@ -524,7 +542,7 @@ function matchCard(card, sales, opts = {}) {
     cands.push({ s, c: check(card, s) });
   }
 
-  const mism = { language: 0, edition: 0, finish: 0, condition: 0 };
+  const mism = { language: 0, edition: 0, finish: 0, condition: 0, reverse_unproven: 0 };
   const strict = [], relaxed = [];
   for (const { s, c } of cands) {
     const vals = Object.values(c);
@@ -532,8 +550,11 @@ function matchCard(card, sales, opts = {}) {
     else if (c.edition === "mismatch") mism.edition++;
     else if (c.finish === "mismatch") mism.finish++;
     else if (c.condition === "mismatch") mism.condition++;
+    else if (c.finish === "unproven") mism.reverse_unproven++;
     const order = ["language", "edition", "finish", "condition"];
     if (vals.includes("mismatch")) { reject(s, order.find((k) => c[k] === "mismatch")); continue; }
+    if (c.finish === "unproven") { reject(s, "reverse_unproven"); continue; }
+    s.finishEff = effectiveFinish(card, s); // für die Anzeige: "Holo" mit eigener Nummer gilt als Reverse
     if (vals.every((v) => v === "match")) { strict.push(s); relaxed.push(s); continue; }
     // gelockert: Sprache und Ausführung dürfen angenommen sein, Edition (bei 1st) und Zustand nicht
     const okRelaxed = (c.language === "match" || c.language === "assumed") &&
@@ -577,7 +598,8 @@ function matchCard(card, sales, opts = {}) {
 // Suchbegriff für eBay: Name und Set, bewertete Karten und Sammelangebote werden schon bei eBay ausgeschlossen.
 // Jede zurückgelieferte Zeile kostet Geld, deshalb lieber vorher aussortieren.
 function buildQuery(card) {
-  const base = [card.name, card.setName].filter(Boolean).join(" ");
+  // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
+  const base = [card.name, card.setName, card.finish === "reverse_holo" ? "reverse" : ""].filter(Boolean).join(" ");
   return base + " -PSA -BGS -CGC -GSG -SGC -Beckett -graded -bewertet -slab -lot -bundle";
 }
 
@@ -618,6 +640,7 @@ function toDbRow(cardId, sale, row) {
 // Tabellenzeile -> Verkauf für matchCard
 function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
+  if (!facts.finish) facts.finish = finishFromText(r.title || "");
   return { ...facts, itemId: r.item_id, title: r.title, url: r.url, price: Number(r.price_eur), soldAt: new Date(r.sold_at).toISOString(), currency: "EUR" };
 }
 
@@ -640,7 +663,7 @@ function triage(card, sale) {
   if (c.language === "mismatch" || c.edition === "mismatch" || c.finish === "mismatch") return "drop";
   if (c.condition === "mismatch" && sale.stageSource === "title") return "drop";
   if (sale.hasDetail) return "ok";
-  const open = c.language !== "match" || c.condition !== "match" || c.finish === "unknown" ||
+  const open = c.language !== "match" || c.condition !== "match" || c.finish === "unknown" || c.finish === "unproven" ||
     (card.firstEdition && c.edition !== "match") || sale.gradedReason === "search-condition";
   return open ? "detail" : "ok";
 }
@@ -1503,13 +1526,14 @@ const EXCL_LABELS = {
   conflict: "Angebote mit widersprüchlichen Angaben", irrelevant: "andere Karten", old: "älter als 12 Monate",
   other_currency: "andere Währung", duplicate: "doppelte Einträge", no_date: "ohne Datum"
 };
-const MISM_LABELS = { language: "andere Sprache", edition: "andere Edition", finish: "andere Ausführung", condition: "anderer Zustand" };
+const MISM_LABELS = { language: "andere Sprache", edition: "andere Edition", finish: "andere Ausführung", condition: "anderer Zustand", reverse_unproven: "Reverse nicht belegt (weder im Titel noch im Merkmal)" };
 const FIN_LABEL = { holo: "Holo", reverse_holo: "Reverse", non_holo: "Non-Holo" };
 const shortDate = iso => new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
 
 function saleTags(s) {
   const t = [s.language || "Sprache offen", s.stage || "Zustand offen"];
-  if (s.finish) t.push(FIN_LABEL[s.finish]);
+  const f = s.finishEff || s.finish;
+  if (f) t.push(FIN_LABEL[f] + (s.finishEff && s.finishEff !== s.finish ? " (laut Nummer)" : ""));
   if (s.edition === "1st") t.push("1st Ed.");
   return t.map(x => `<span class="tag">${esc(x)}</span>`).join("");
 }
@@ -1584,7 +1608,7 @@ async function openDetail(id) {
         <label class="check fcheck"><input id="first" type="checkbox"${c.first_edition ? " checked" : ""}> 1st Edition</label>
         <label class="fwide">Sprache der Karte<select id="lang"><option value="DE"${c.language === "DE" ? " selected" : ""}>Deutsch</option><option value="EN"${c.language === "EN" ? " selected" : ""}>Englisch</option></select></label>
         <label class="fwide">Bildadresse (leer = automatisch)<input id="imgurl" type="url" value="${esc(c.image_url || "")}" placeholder="https://… (Adresse eines Kartenbilds)" autocomplete="off"></label>
-        <label class="fwide">eBay-Suchbegriff (leer = automatisch)<input id="eq" type="text" value="${esc(c.ebay_query || "")}" placeholder="${esc(EBAY.buildQuery({ name: c.name, setName: c.set_name }))}" autocomplete="off"></label>
+        <label class="fwide">eBay-Suchbegriff (leer = automatisch)<input id="eq" type="text" value="${esc(c.ebay_query || "")}" placeholder="${esc(EBAY.buildQuery({ name: c.name, setName: c.set_name, finish: finishOf(c) }))}" autocomplete="off"></label>
       </div>
       <div class="dactions">
         <button id="del" class="dangerlink">Karte löschen</button>
