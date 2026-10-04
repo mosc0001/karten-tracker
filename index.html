@@ -129,6 +129,27 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .chg.up{color:var(--up)}
 .chg.down{color:var(--down)}
 .frow2{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.frow2 select{width:auto;flex:0 1 auto}
+.fbar{display:flex;gap:8px;align-items:center;min-width:0}
+.fbtn{flex:none;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);font-size:.88rem;font-weight:600}
+.fbadge{background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:0 7px;font-size:.75rem;font-weight:700;line-height:1.5}
+.fquick{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:2px 0;min-width:0}
+.fquick::-webkit-scrollbar{display:none}
+.fchip{flex:none;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:none;color:var(--ink);font-size:.85rem;white-space:nowrap}
+.fchip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.fchip:disabled{opacity:.4}
+.fchip small{opacity:.75;margin-left:4px;font-size:.78rem}
+.factive{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.factive:empty{display:none}
+.achip{display:inline-flex;align-items:center;gap:2px;padding:3px 4px 3px 10px;border:1px solid var(--accent);border-radius:999px;background:none;color:var(--ink);font-size:.8rem}
+.achip span{font-size:1rem;line-height:1;padding:0 4px;color:var(--muted)}
+.fgroup{margin:14px 0 0}
+.fgroup h3{font-size:.85rem;margin:0 0 6px;color:var(--muted);font-weight:600}
+.fopts{display:flex;flex-wrap:wrap;gap:6px}
+.fgroup select{margin:0}
+.fnote{color:var(--muted);font-size:.8rem;margin:6px 0 0}
+.pfoot{position:sticky;bottom:calc(-24px - env(safe-area-inset-bottom));background:var(--surface);margin:16px -16px 0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));display:flex;gap:12px;align-items:center;justify-content:space-between;border-top:1px solid var(--line)}
+.pfoot .primary{flex:1}
 .vseg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-left:auto}
 .vseg button{background:none;border:0;padding:7px 14px;font-size:.88rem;color:var(--muted)}
 .vseg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
@@ -748,7 +769,7 @@ return { parseSale, matchCard, buildQuery, cardFromRow, saleFromDb, snapshotPayl
 })();
 /*EBAY-LOGIC-END*/
 
-const state = { cards: [], latest: {}, daily: [], view: "list", filter: { q: "", lang: "", set: "", missing: false, sort: "value" } };
+const state = { cards: [], latest: {}, daily: [], view: "list", filter: { q: "", set: "", status: [], finish: [], first: [], value: [], cond: [], dupes: [], lang: [], sort: "value" } };
 const triedImages = new Set();
 const YEAR_KEY = "kt_set_years_v1";
 try { state.setYears = JSON.parse(localStorage.getItem(YEAR_KEY) || "{}") || {}; } catch (e) { state.setYears = {}; }
@@ -1056,8 +1077,6 @@ function wireSuggestions(input) {
       f.set = s.value;
       f.q = "";
       input.value = "";
-      const sel = $("#fset");
-      if (sel) sel.value = s.value;
     } else {
       f.q = s.value;
       input.value = s.value;
@@ -1184,7 +1203,6 @@ function renderMain() {
   const f = state.filter;
   const sets = setNames();
   if (f.set && !sets.includes(f.set)) f.set = "";
-  if (!missing) f.missing = false;
 
   const filters = state.cards.length ? `
       <section class="filters" aria-label="Suche und Filter">
@@ -1192,22 +1210,15 @@ function renderMain() {
           <input id="fq" type="search" placeholder="Name, Set oder Nummer suchen" value="${esc(f.q)}" autocomplete="off" aria-label="Suche" role="combobox" aria-autocomplete="list" aria-controls="fsug" aria-expanded="false">
           <ul id="fsug" class="sug" role="listbox" aria-label="Vorschläge" hidden></ul>
         </div>
-        <div class="frow">
-          <select id="flang" aria-label="Sprache">
-            <option value="">Alle Sprachen</option>
-            <option value="DE"${f.lang === "DE" ? " selected" : ""}>Deutsch</option>
-            <option value="EN"${f.lang === "EN" ? " selected" : ""}>Englisch</option>
-          </select>
-          <select id="fset" aria-label="Set">
-            <option value="">Alle Sets</option>
-            ${sets.map(v => `<option value="${esc(v)}"${v === f.set ? " selected" : ""}>${esc(setLabel(v))}</option>`).join("")}
-          </select>
+        <div class="fbar">
+          <button id="fbtn" class="fbtn" aria-haspopup="dialog">Filter <span id="fbadge" class="fbadge" hidden></span></button>
+          <div id="fquick" class="fquick" role="group" aria-label="Schnellfilter"></div>
+        </div>
+        <div id="factive" class="factive" aria-label="Aktive Filter"></div>
+        <div class="frow2">
           <select id="fsort" aria-label="Sortierung">
             ${SORTS.map(([v, l]) => `<option value="${v}"${v === f.sort ? " selected" : ""}>${l}</option>`).join("")}
           </select>
-        </div>
-        <div class="frow2">
-          ${missing ? `<label class="toggle"><input id="fmissing" type="checkbox"${f.missing ? " checked" : ""}> Nur Einträge ohne belastbaren Wert</label>` : ""}
           <div class="vseg" role="group" aria-label="Ansicht">
             <button data-view="list" aria-pressed="${state.view === "list"}">Liste</button>
             <button data-view="grid" aria-pressed="${state.view === "grid"}">Galerie</button>
@@ -1278,11 +1289,22 @@ function renderMain() {
   const fq = $("#fq");
   if (fq) {
     wireSuggestions(fq);
-    $("#flang").onchange = e => { f.lang = e.target.value; renderList(); };
-    $("#fset").onchange = e => { f.set = e.target.value; renderList(); };
     $("#fsort").onchange = e => { f.sort = e.target.value; renderList(); };
-    const fm = $("#fmissing");
-    if (fm) fm.onchange = () => { f.missing = fm.checked; renderList(); };
+    $("#fbtn").onclick = openFilterPanel;
+    $("#fquick").onclick = e => {
+      const b = e.target.closest("[data-qi]");
+      if (!b) return;
+      const x = QUICK[Number(b.dataset.qi)];
+      toggleVals(x.key, x.vals);
+      renderList();
+    };
+    $("#factive").onclick = e => {
+      const b = e.target.closest("[data-rm]");
+      if (!b) return;
+      const [key, v] = b.dataset.rm.split(":");
+      if (key === "set") f.set = ""; else f[key] = f[key].filter(x => x !== v);
+      renderList();
+    };
     document.querySelectorAll(".vseg button").forEach(b => b.onclick = () => {
       state.view = b.dataset.view;
       try { localStorage.setItem("kt_view", state.view); } catch (e) { /* nicht gespeichert */ }
@@ -1293,9 +1315,7 @@ function renderMain() {
   }
   const sm = $("#showmissing");
   if (sm) sm.onclick = () => {
-    f.missing = true;
-    const fm = $("#fmissing");
-    if (fm) fm.checked = true;
+    f.status = [...NOT_COUNTED];
     renderList();
     $(".filters").scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -1314,20 +1334,152 @@ function closeMenu(focusButton) {
   return true;
 }
 
+/* ---------- Filter: innerhalb einer Gruppe "oder", zwischen Gruppen "und" ---------- */
+const FGROUPS = [
+  { key: "status", label: "Datenstatus", opts: [["counted", "Belastbar"], ["prov", "Vorläufig"], ["nomatch", "Kein passender Verkauf"], ["unchecked", "Noch nicht abgefragt"]] },
+  { key: "finish", label: "Ausführung", opts: [["non_holo", "Normal"], ["holo", "Holo"], ["reverse_holo", "Reverse Holo"]] },
+  { key: "first", label: "Edition", opts: [["1", "1st Edition"]] },
+  { key: "value", label: "Wert pro Karte", opts: [["v0", "bis 5 €"], ["v5", "5–20 €"], ["v20", "20–50 €"], ["v50", "50–100 €"], ["v100", "über 100 €"]] },
+  { key: "cond", label: "Zustand", opts: [["NM", "NM"], ["LP", "LP"], ["MP", "MP"], ["HP", "HP"]] },
+  { key: "dupes", label: "Menge", opts: [["1", "Doppelte (Menge über 1)"]] },
+  { key: "lang", label: "Sprache", opts: [["DE", "Deutsch"], ["EN", "Englisch"]] },
+];
+// Schnellfilter: Abkürzungen auf dieselben Gruppen
+const QUICK = [
+  { label: "Holo", key: "finish", vals: ["holo"] },
+  { label: "Reverse", key: "finish", vals: ["reverse_holo"] },
+  { label: "1st Edition", key: "first", vals: ["1"] },
+  { label: "Doppelte", key: "dupes", vals: ["1"] },
+  { label: "über 20 €", key: "value", vals: ["v20", "v50", "v100"] },
+  { label: "Vorläufig", key: "status", vals: ["prov"] },
+];
+const NOT_COUNTED = ["prov", "nomatch", "unchecked"];
+
+function facetOf(key, r) {
+  const c = r.c;
+  switch (key) {
+    case "status": return r.counted ? "counted" : r.unit != null ? "prov" : c.ebay_checked_at ? "nomatch" : "unchecked";
+    case "finish": return finishOf(c);
+    case "first": return c.first_edition ? "1" : "";
+    case "value": { const u = r.unit; return u == null ? "" : u < 5 ? "v0" : u < 20 ? "v5" : u < 50 ? "v20" : u < 100 ? "v50" : "v100"; }
+    case "cond": return c.condition;
+    case "dupes": return c.quantity > 1 ? "1" : "";
+    case "lang": return c.language;
+    default: return "";
+  }
+}
+
+// Passt eine Zeile zu allen Filtern? skipKey: diese Gruppe auslassen (für die Anzahlen an den Optionen)
+function rowMatches(r, f, skipKey, tokens, years) {
+  const c = r.c;
+  if (f.set && c.set_name !== f.set) return false;
+  for (const g of FGROUPS) {
+    if (g.key === skipKey || !f[g.key].length) continue;
+    if (!f[g.key].includes(facetOf(g.key, r))) return false;
+  }
+  if (tokens.length) {
+    const hay = norm(`${c.name} ${c.set_name || ""} ${c.card_number || ""} ${years.get(c.set_name) || ""} ${c.first_edition ? "1st edition first edition" : ""} ${finishOf(c) === "holo" ? "holo" : finishOf(c) === "reverse_holo" ? "reverse holo" : ""}`);
+    if (!tokens.every(t => hay.includes(t))) return false;
+  }
+  return true;
+}
+const filterCtx = () => ({ tokens: norm(state.filter.q).split(/\s+/).filter(Boolean), years: new Map(setNames().map(n => [n, setYear(n)])) });
+
+function activeCount(f) {
+  return FGROUPS.reduce((n, g) => n + f[g.key].length, 0) + (f.set ? 1 : 0);
+}
 function filterActive(f) {
-  return Boolean(f.q.trim() || f.lang || f.set || f.missing);
+  return Boolean(f.q.trim() || activeCount(f));
+}
+function toggleVals(key, vals) {
+  const f = state.filter;
+  const on = vals.every(v => f[key].includes(v));
+  f[key] = on ? f[key].filter(v => !vals.includes(v)) : [...new Set([...f[key], ...vals])];
 }
 
 function resetFilters() {
-  Object.assign(state.filter, { q: "", lang: "", set: "", missing: false });
+  const f = state.filter;
+  f.q = ""; f.set = "";
+  for (const g of FGROUPS) f[g.key] = [];
   const fq = $("#fq");
   if (fq) fq.value = "";
-  for (const sel of ["#flang", "#fset"]) { const el = $(sel); if (el) el.value = ""; }
-  const fm = $("#fmissing");
-  if (fm) fm.checked = false;
   const sg = $("#fsug");
   if (sg) { sg.hidden = true; if (fq) fq.setAttribute("aria-expanded", "false"); }
   renderList();
+  if ($("#fpanel")) renderFilterPanel();
+}
+
+// Schnellfilter, Filterknopf und aktive Filter über der Liste
+function renderFilterBar(all) {
+  const f = state.filter;
+  const q = $("#fquick"), act = $("#factive"), badge = $("#fbadge");
+  if (!q) return;
+  const n = activeCount(f);
+  badge.textContent = n;
+  badge.hidden = !n;
+  $("#fbtn").setAttribute("aria-label", n ? `Filter, ${n} aktiv` : "Filter");
+  q.innerHTML = QUICK.map((x, i) => {
+    const on = x.vals.every(v => f[x.key].includes(v));
+    const has = all.some(r => x.vals.includes(facetOf(x.key, r)));
+    return on || has ? `<button class="fchip" data-qi="${i}" aria-pressed="${on}">${esc(x.label)}</button>` : "";
+  }).join("");
+  const chips = [];
+  for (const g of FGROUPS) for (const v of f[g.key]) {
+    const o = g.opts.find(([k]) => k === v);
+    chips.push(`<button class="achip" data-rm="${esc(g.key)}:${esc(v)}" aria-label="Filter ${esc(o ? o[1] : v)} entfernen">${esc(o ? o[1] : v)}<span aria-hidden="true">×</span></button>`);
+  }
+  if (f.set) chips.push(`<button class="achip" data-rm="set:" aria-label="Filter Set entfernen">Set: ${esc(setLabel(f.set))}<span aria-hidden="true">×</span></button>`);
+  act.innerHTML = chips.join("");
+}
+
+// Alle Filter im Panel (am Handy von unten, am Rechner als Fenster)
+function openFilterPanel() {
+  const sheet = openSheet(`
+    <header class="sheet-head"><h2>Filter</h2><button class="ghost" data-close>Fertig</button></header>
+    <p class="fnote">Innerhalb einer Gruppe gilt „oder“, zwischen Gruppen „und“. Die Zahl zeigt, wie viele Einträge du mit dieser Auswahl siehst.</p>
+    <div id="fpanel"></div>`);
+  sheet.onclick = e => {
+    const b = e.target.closest("[data-fk]");
+    if (b && !b.disabled) {
+      toggleVals(b.dataset.fk, [b.dataset.fv]);
+      renderList(); renderFilterPanel();
+      return;
+    }
+    if (e.target.closest("#preset")) { resetFilters(); return; }
+    if (e.target.closest("#pshow")) closeSheet();
+  };
+  renderFilterPanel();
+}
+
+function renderFilterPanel() {
+  const box = $("#fpanel");
+  if (!box) return;
+  const f = state.filter;
+  const all = cardRows();
+  const { tokens, years } = filterCtx();
+  const groups = FGROUPS.map(g => {
+    const base = all.filter(r => rowMatches(r, f, g.key, tokens, years));
+    const opts = g.opts.map(([v, label]) => {
+      const n = base.filter(r => facetOf(g.key, r) === v).length;
+      const on = f[g.key].includes(v);
+      return `<button class="fchip" data-fk="${g.key}" data-fv="${v}" aria-pressed="${on}"${!n && !on ? " disabled" : ""}>${esc(label)}<small>${n}</small></button>`;
+    }).join("");
+    return `<div class="fgroup" role="group" aria-label="${esc(g.label)}"><h3>${esc(g.label)}</h3><div class="fopts">${opts}</div>
+      ${g.key === "value" ? `<p class="fnote">Maßgeblich ist der angezeigte Wert pro Karte, auch wenn er vorläufig ist.</p>` : ""}</div>`;
+  });
+  const sets = setNames();
+  groups.push(`<div class="fgroup"><h3>Set</h3><select id="pset" aria-label="Set">
+      <option value="">Alle Sets</option>
+      ${sets.map(v => `<option value="${esc(v)}"${v === f.set ? " selected" : ""}>${esc(setLabel(v))}</option>`).join("")}
+    </select></div>`);
+  const rows = all.filter(r => rowMatches(r, f, null, tokens, years));
+  const qty = rows.reduce((s, r) => s + r.c.quantity, 0);
+  const top = box.closest(".sheet") ? box.closest(".sheet").scrollTop : 0;
+  box.innerHTML = groups.join("") + `<div class="pfoot">
+      <button class="linkish" id="preset"${filterActive(f) ? "" : " disabled"}>Alle zurücksetzen</button>
+      <button class="primary" id="pshow">${qty} ${qty === 1 ? "Karte" : "Karten"} anzeigen</button></div>`;
+  if (box.closest(".sheet")) box.closest(".sheet").scrollTop = top;
+  $("#pset").onchange = e => { f.set = e.target.value; renderList(); renderFilterPanel(); };
 }
 
 function renderList() {
@@ -1338,18 +1490,10 @@ function renderList() {
     return;
   }
   const f = state.filter;
-  const tokens = norm(f.q).split(/\s+/).filter(Boolean);
-  const years = new Map(setNames().map(n => [n, setYear(n)]));
-  const rows = cardRows().filter(({ c, counted }) => {
-    if (f.lang && c.language !== f.lang) return false;
-    if (f.set && c.set_name !== f.set) return false;
-    if (f.missing && counted) return false;
-    if (tokens.length) {
-      const hay = norm(`${c.name} ${c.set_name || ""} ${c.card_number || ""} ${years.get(c.set_name) || ""} ${c.first_edition ? "1st edition first edition" : ""} ${finishOf(c) === "holo" ? "holo" : finishOf(c) === "reverse_holo" ? "reverse holo" : "non-holo"}`);
-      if (!tokens.every(t => hay.includes(t))) return false;
-    }
-    return true;
-  });
+  const { tokens, years } = filterCtx();
+  const all = cardRows();
+  renderFilterBar(all);
+  const rows = all.filter(r => rowMatches(r, f, null, tokens, years));
   const sorters = {
     value: (a, b) => (b.total ?? -1) - (a.total ?? -1),
     name: (a, b) => a.c.name.localeCompare(b.c.name, "de"),
