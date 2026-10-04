@@ -8,7 +8,7 @@
 //   5. Verkäufe speichern, dann für ALLE Karten den Wert neu berechnen (auch ohne neue Abfrage)
 
 import {
-  parseSale, matchCard, buildQuery, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey,
+  parseSale, matchCard, buildQuery, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey, queryKey, setIdOf,
 } from "./ebay-logic.mjs";
 
 const env = process.env;
@@ -124,8 +124,9 @@ async function runActor(input, label, capUsd) {
 
 const proxy = { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "DE" };
 const searchUrl = (q) => `https://www.ebay.de/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13`;
-const qKey = (q) => String(q).toLowerCase().split(/\s+/).filter((t) => t && !t.startsWith("-")).join(" ");
-const queryOf = (card) => (card.ebay_query && card.ebay_query.trim()) || buildQuery({ name: card.name, setName: card.set_name, finish: card.finish || (card.foil ? "holo" : "non_holo") });
+const qKey = queryKey;
+const queryOf = (card) => (card.ebay_query && card.ebay_query.trim()) ||
+  buildQuery({ name: card.name, setName: card.set_name, setId: setIdOf(card), finish: card.finish || (card.foil ? "holo" : "non_holo") });
 
 function rowQuery(r) {
   const skw = (r.basic_info && r.basic_info.skw) || null;
