@@ -191,6 +191,10 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .sale .sp small{display:block;font-weight:400;color:var(--muted);font-size:.74rem}
 .sale .stl{grid-column:1/3;color:var(--muted);font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;min-width:0}
 .sale .sx{padding:4px 10px;font-size:.8rem;justify-self:end}
+.sale.hasimg{grid-template-columns:2.8rem 5.2rem 1fr auto}
+.sale .simg{grid-row:1 / span 2;width:2.8rem;height:3.8rem;border-radius:4px;overflow:hidden;background:var(--line);display:block}
+.sale .simg img{width:100%;height:100%;object-fit:cover;display:block}
+.sale.hasimg .stl{grid-column:2 / 4}
 details.more{margin-top:12px;font-size:.85rem;color:var(--muted)}
 details.more summary{cursor:pointer;padding:4px 0}
 details.more ul{margin:6px 0 0;padding-left:18px}
@@ -337,6 +341,14 @@ function parseSoldAt(row, detail) {
   return null;
 }
 
+// Vorschaubild des Angebots (bleibt sichtbar, auch wenn das Angebot bei eBay verschwunden ist)
+const EBAY_IMG = /^https:\/\/i\.ebayimg\.com\/[^\s"'<>]+$/;
+function pickImage(row, detail) {
+  const cands = [row && row.image, detail && Array.isArray(detail.images) && detail.images[0], detail && detail.image];
+  for (const c of cands) if (typeof c === "string" && EBAY_IMG.test(c)) return c;
+  return null;
+}
+
 /* ========================================================================
    parseSale: aus einer Suchzeile (und, falls vorhanden, der Artikelseite) die Merkmale lesen
    ======================================================================== */
@@ -424,6 +436,7 @@ function parseSale(row, detail = null) {
     graded, gradedReason,
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
     stage, stageSource, language, edition, variant, reprint, finish, conflicts,
+    image: pickImage(row, detail),
   };
 }
 
@@ -647,7 +660,7 @@ function saleFromDb(r) {
 // Suchzeile einer gespeicherten Zeile rekonstruieren (für nachträgliche Detailseiten)
 function rowFromDb(r) {
   const raw = (r.parsed && r.parsed.raw) || {};
-  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted };
+  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted, image: (r.parsed && r.parsed.image) || null };
 }
 
 // Vorauswahl: lohnt sich eine Detailseite (kostet Geld)?  "drop" = nicht zur Karte, "ok" = reicht, "detail" = Detailseite holen
@@ -1530,6 +1543,26 @@ const MISM_LABELS = { language: "andere Sprache", edition: "andere Edition", fin
 const FIN_LABEL = { holo: "Holo", reverse_holo: "Reverse", non_holo: "Non-Holo" };
 const shortDate = iso => new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
 
+// Saubere Angebotslinks: nur die Artikelnummer, ohne Produktnummer (epid) und Zusatzparameter.
+// Mit epid leitet eBay bei nicht mehr verfügbaren Angeboten auf die allgemeine Produktseite um.
+function ebayItemUrl(itemId, url) {
+  const id = String(itemId || "");
+  if (/^\d{1,20}$/.test(id)) return `https://www.ebay.de/itm/${id}`;
+  const m = String(url || "").match(/^https:\/\/www\.ebay\.[a-z.]+\/itm\/(?:[^/?#]*\/)?(\d{1,20})/i);
+  if (m) return `https://www.ebay.de/itm/${m[1]}`;
+  return /^https:\/\/www\.ebay\.[a-z.]+\//i.test(url || "") ? String(url).split(/[?#]/)[0] : "#";
+}
+// Vorschaubild nur von eBays Bildserver; Größe über den Dateinamen (s-l225 klein, s-l1600 groß)
+function ebayImg(src, size) {
+  if (typeof src !== "string" || !/^https:\/\/i\.ebayimg\.com\/[^\s"'<>]+$/.test(src)) return null;
+  return /\/s-l\d+\.(jpg|jpeg|png|webp)$/i.test(src) ? src.replace(/\/s-l\d+\.(jpg|jpeg|png|webp)$/i, `/s-l${size}.$1`) : src;
+}
+function saleImgHtml(src) {
+  const small = ebayImg(src, 225), big = ebayImg(src, 1600);
+  if (!small) return "";
+  return `<a class="simg" href="${esc(big)}" target="_blank" rel="noopener" title="Angebotsfoto groß öffnen"><img src="${esc(small)}" alt="Angebotsfoto" loading="lazy" onerror="this.parentNode.style.visibility='hidden'"></a>`;
+}
+
 function saleTags(s) {
   const t = [s.language || "Sprache offen", s.stage || "Zustand offen"];
   const f = s.finishEff || s.finish;
@@ -1628,11 +1661,12 @@ async function openDetail(id) {
   const openStages = new Set([c.condition]); // aufgeklappte Zustände, deiner ist zu Beginn offen
   let lastRes = null;
 
-  const saleLi = s => `<li class="sale">
+  const saleLi = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
+      ${saleImgHtml(s.image)}
       <span class="sd">${shortDate(s.soldAt)}</span>
       <span class="st">${saleTags(s)}</span>
       <span class="sp">${eur(s.price)}${s.priceUncertain ? `<small>Preisvorschlag</small>` : ""}</span>
-      <a class="stl" href="${esc(s.url || "#")}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
+      <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
       <button class="ghost sx" data-x="${s._id}">Ausschließen</button>
     </li>`;
 
@@ -1659,10 +1693,11 @@ async function openDetail(id) {
     box.innerHTML = `
       ${bits.length ? `<details class="more"><summary>Nicht berücksichtigt (${bits.length} ${bits.length === 1 ? "Grund" : "Gründe"})</summary>
         <ul>${bits.map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}
-      ${userEx.length ? `<p class="dsmall">Von dir ausgeschlossen:</p><ul class="sales">${userEx.map(r => `<li class="sale">
+      ${userEx.length ? `<p class="dsmall">Von dir ausgeschlossen:</p><ul class="sales">${userEx.map(r => { const im = r.parsed && r.parsed.image; return `<li class="sale${ebayImg(im, 225) ? " hasimg" : ""}">
+        ${saleImgHtml(im)}
         <span class="sd">${shortDate(r.sold_at)}</span><span class="st"></span><span class="sp">${eur(Number(r.price_eur))}</span>
-        <a class="stl" href="${esc(r.url || "#")}" target="_blank" rel="noopener" title="${esc(r.title)}">${esc(r.title)}</a>
-        <button class="ghost sx" data-in="${r.id}">Wieder einbeziehen</button></li>`).join("")}</ul>` : ""}
+        <a class="stl" href="${esc(ebayItemUrl(r.item_id, r.url))}" target="_blank" rel="noopener" title="${esc(r.title)}">${esc(r.title)}</a>
+        <button class="ghost sx" data-in="${r.id}">Wieder einbeziehen</button></li>`; }).join("")}</ul>` : ""}
       ${!bits.length && !userEx.length ? `<p class="muted dsmall">Nichts aussortiert.</p>` : ""}`;
   };
 
