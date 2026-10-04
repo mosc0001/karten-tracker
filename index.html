@@ -68,6 +68,16 @@ input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--in
 .noimg{background:var(--line)}
 .pick small{display:block;color:var(--muted)}
 .preview{display:flex;gap:14px;margin-top:12px}
+.scanrow{margin:4px 0 10px}
+.scanrow button{width:100%}
+.scanrow p{margin:6px 0 0}
+.scanprev{display:flex;gap:12px;align-items:flex-start;margin-top:10px}
+.scanprev img{width:96px;height:auto;border-radius:6px;flex:none}
+.preview img.scanmini{outline:2px solid var(--accent);outline-offset:1px}
+.scanhint{margin:10px 0 4px;padding:10px 12px;border:1px solid var(--accent);border-radius:10px;font-size:.88rem}
+.scanhint ul{margin:6px 0 0;padding-left:18px}
+.scanhint li{margin:3px 0}
+.scanhint .warn{font-weight:600}
 .preview img{width:96px;height:auto;border-radius:6px;align-self:flex-start}
 .preview p{margin:2px 0}
 .hist{margin:12px 0}
@@ -1383,10 +1393,51 @@ function setIdFromCardId(id, localId) {
   return i > 0 ? id.slice(0, i) : id;
 }
 
+/* ---------- Kamera-Scan: erkennen und bestätigen ---------- */
+// Foto verkleinern: spart Übertragung und Kosten. Die Claude-Schnittstelle verkleinert größere Bilder ohnehin.
+function loadImg(src) {
+  return new Promise((ok, bad) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => bad(new Error("Das Foto konnte nicht gelesen werden.")); im.src = src; });
+}
+async function photoToJpeg(file, maxEdge = 1400) {
+  const url = URL.createObjectURL(file);
+  try {
+    const im = await loadImg(url);
+    const sc = Math.min(1, maxEdge / Math.max(im.naturalWidth, im.naturalHeight));
+    const w = Math.max(1, Math.round(im.naturalWidth * sc)), h = Math.max(1, Math.round(im.naturalHeight * sc));
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(im, 0, 0, w, h);
+    const dataUrl = cv.toDataURL("image/jpeg", 0.9);
+    return { dataUrl, base64: dataUrl.split(",")[1], w, h };
+  } finally { URL.revokeObjectURL(url); }
+}
+// Erkennung über die Supabase-Funktion scan-card (dort liegt der Schlüssel für die Claude-Schnittstelle)
+async function recognizeCard(base64) {
+  try {
+    const { data, error } = await db.functions.invoke("scan-card", { body: { image: base64, mediaType: "image/jpeg" } });
+    if (error) {
+      let msg = error.message || "Erkennung fehlgeschlagen.";
+      const status = error.context && error.context.status;
+      try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* keine JSON-Antwort */ }
+      if (status === 404 || /not found|failed to send/i.test(msg)) msg = "Der Scanner ist noch nicht eingerichtet: Die Supabase-Funktion scan-card fehlt oder ist nicht erreichbar.";
+      return { error: msg };
+    }
+    return { card: data && data.card };
+  } catch (e) {
+    return { error: "Erkennung fehlgeschlagen: " + e.message };
+  }
+}
+const numKey = x => String(x ?? "").trim().toUpperCase().replace(/^([A-Z]*)0*(\d)/, "$1$2");
+
 function openAdd() {
   const s = { lang: "DE", picked: null, results: [] };
   const sheet = openSheet(`
     <header class="sheet-head"><h2>Karte hinzufügen</h2><button class="ghost" data-close>Fertig</button></header>
+    <div class="scanrow">
+      <button id="scanbtn" class="primary">📷 Karte scannen</button>
+      <input id="scanfile" type="file" accept="image/*" capture="environment" hidden>
+      <p class="muted dsmall">Foto der Vorderseite, möglichst gerade, hell und ohne Spiegelung. Danach bestätigst du alles.</p>
+    </div>
     <div class="seg" id="langseg"><button data-l="DE" class="on">Deutsch</button><button data-l="EN">Englisch</button></div>
     <div class="searchrow">
       <input id="q" type="search" placeholder="Name oder Nummer, z. B. Mewtu oder 6/105" enterkeyhint="search" autocomplete="off">
@@ -1439,25 +1490,32 @@ function openAdd() {
     }
   }
 
+  // Alle Karten mit dieser Nummer in Sets mit dieser offiziellen Kartenzahl (null = kein solches Set)
+  async function findByNumber(localNum, official) {
+    const sets = await setsFor(lang());
+    const cands = sets.filter(x => x.cardCount && Number(x.cardCount.official) === official).slice(0, 12);
+    if (!cands.length) return null;
+    const variants = [...new Set([localNum, localNum.replace(/^0+(?=\d)/, ""), localNum.padStart(3, "0")])];
+    const found = [];
+    for (const set of cands) {
+      for (const v of variants) {
+        try {
+          const card = await tcg(`${lang()}/cards/${encodeURIComponent(`${set.id}-${v}`)}`);
+          if (card && card.id) { found.push({ id: card.id, name: card.name, image: card.image, localId: card.localId, setName: set.name }); break; }
+        } catch (e) { /* diese Schreibweise gibt es nicht, nächste probieren */ }
+      }
+    }
+    return found;
+  }
+
   // "6/105": Karte Nr. 6 aus einem Set mit 105 offiziellen Karten
   async function searchByNumber(localNum, official, nameFilter) {
     res.innerHTML = `<p class="muted">Suche nach Nr. ${esc(localNum)}/${official} …</p>`;
     try {
-      const sets = await setsFor(lang());
-      const cands = sets.filter(x => x.cardCount && Number(x.cardCount.official) === official).slice(0, 12);
-      if (!cands.length) {
+      const found = await findByNumber(localNum, official);
+      if (!found) {
         res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache.</p>`;
         return;
-      }
-      const variants = [...new Set([localNum, localNum.replace(/^0+(?=\d)/, ""), localNum.padStart(3, "0")])];
-      const found = [];
-      for (const set of cands) {
-        for (const v of variants) {
-          try {
-            const card = await tcg(`${lang()}/cards/${encodeURIComponent(`${set.id}-${v}`)}`);
-            if (card && card.id) { found.push({ id: card.id, name: card.name, image: card.image, localId: card.localId, setName: set.name }); break; }
-          } catch (e) { /* diese Schreibweise gibt es nicht, nächste probieren */ }
-        }
       }
       const nf = norm(nameFilter);
       const list = nf ? found.filter(c => norm(c.name).includes(nf)) : found;
@@ -1469,6 +1527,83 @@ function openAdd() {
     } catch (e) {
       res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
     }
+  }
+
+  // Erkannte Karte bei TCGdex finden: erst über Nummer und Setgröße, sonst über den Namen
+  async function findScanned(card) {
+    const num = String(card.number || "").trim(), tot = String(card.total || "").trim();
+    const nameN = norm(card.name);
+    const sameName = c => { const n = norm(c.name); return Boolean(nameN && n && (n.includes(nameN) || nameN.includes(n))); };
+    let byNum = [];
+    if (num && /^\d+$/.test(tot)) byNum = (await findByNumber(num, Number(tot)).catch(() => null)) || [];
+    const both = byNum.filter(sameName);
+    if (both.length) return both;
+    if (!card.name) return byNum;
+    // Nummern mit Buchstaben (z. B. H3/H32) oder kein Treffer: über den Namen suchen und nach Nummer filtern
+    const [list, sets] = await Promise.all([
+      tcg(`${lang()}/cards?name=${encodeURIComponent(card.name)}&pagination:page=1&pagination:itemsPerPage=60`).catch(() => []),
+      setsFor(lang()).catch(() => [])
+    ]);
+    const setName = new Map(sets.map(x => [x.id, x.name]));
+    const withNum = num ? list.filter(c => numKey(c.localId) === numKey(num)) : [];
+    const out = (withNum.length ? withNum : list).map(c => ({ ...c, setName: setName.get(setIdFromCardId(c.id, c.localId)) }));
+    return withNum.length ? out : (byNum.length ? byNum : out.slice(0, 20));
+  }
+
+  const scanPrev = (photo, inner) => `<div class="scanprev"><img src="${esc(photo)}" alt="Dein Foto"><div>${inner}</div></div>`;
+
+  $("#scanbtn", sheet).onclick = () => $("#scanfile", sheet).click();
+  $("#scanfile", sheet).onchange = async ev => {
+    const file = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!file) return;
+    s.scan = null; s.picked = null; s.results = [];
+    res.innerHTML = `<p class="muted">Foto wird vorbereitet …</p>`;
+    let photo;
+    try { photo = await photoToJpeg(file); } catch (e) { res.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+    res.innerHTML = scanPrev(photo.dataUrl, `<p class="muted" role="status">Karte wird erkannt …</p>`);
+    const { card, error } = await recognizeCard(photo.base64);
+    if (error) {
+      res.innerHTML = scanPrev(photo.dataUrl, `<p class="err">${esc(error)}</p><p class="muted dsmall">Du kannst die Karte trotzdem oben über die Suche hinzufügen.</p>`);
+      return;
+    }
+    if (!card || card.is_card === false || !card.name) {
+      res.innerHTML = scanPrev(photo.dataUrl, `<p class="err">Auf dem Foto wurde keine Karte erkannt.</p><p class="muted dsmall">Versuche es mit einem geraderen, helleren Foto ohne Spiegelung, oder nutze die Suche.</p>`);
+      return;
+    }
+    s.scan = { card, photo: photo.dataUrl };
+    if (card.language === "DE" || card.language === "EN") {
+      s.lang = card.language;
+      sheet.querySelectorAll("#langseg button").forEach(x => x.classList.toggle("on", x.dataset.l === s.lang));
+    }
+    const numText = card.number ? ` Nr. ${card.number}${card.total ? "/" + card.total : ""}` : "";
+    $("#q", sheet).value = `${card.name}${card.number && card.total && /^\d+$/.test(String(card.total)) ? ` ${card.number}/${card.total}` : ""}`;
+    res.innerHTML = scanPrev(photo.dataUrl, `<p><b>${esc(card.name)}</b>${esc(numText)}</p><p class="muted" role="status">Karte wird gesucht …</p>`);
+    const list = await findScanned(card);
+    const other = card.language && !["DE", "EN"].includes(card.language)
+      ? ` Erkannte Sprache: ${card.language}. Die App unterstützt Deutsch und Englisch, bitte Sprache prüfen.` : "";
+    if (list.length === 1 && !other) return pick(list[0].id);
+    if (list.length) return showResults(list, `Erkannt: ${card.name}${numText}. ${list.length === 1 ? "Bitte bestätigen." : "Mehrere Karten passen, bitte die richtige wählen."}${other}`);
+    res.innerHTML = scanPrev(photo.dataUrl, `<p><b>${esc(card.name)}</b>${esc(numText)}</p><p class="muted">Die Karte wurde erkannt, aber bei TCGdex nicht gefunden. Prüfe die Sprache oben und suche über das Suchfeld.${esc(other)}</p>`);
+  };
+
+  // Hinweise zum Scan-Ergebnis im Formular: was übernommen wurde und was du prüfen solltest
+  function scanHintHtml(card, tc, v, finishSet, firstSet) {
+    const items = [];
+    const sameNum = !card.number || numKey(card.number) === numKey(tc.localId);
+    items.push(sameNum
+      ? `Erkannt: ${esc(card.name)}${card.number ? `, Nr. ${esc(card.number)}${card.total ? "/" + esc(card.total) : ""}` : ""}, ${esc(card.language || "Sprache offen")}.`
+      : `<span class="warn">Nummer weicht ab:</span> Foto ${esc(card.number)}, gewählte Karte ${esc(tc.localId)}. Bitte prüfen.`);
+    if (card.first_edition === true && firstSet) items.push("1st Edition: Stempel erkannt, angehakt.");
+    else if (card.first_edition === true) items.push(`<span class="warn">1st Edition erkannt,</span> laut TCGdex gibt es aber keinen 1st-Edition-Druck. Bitte prüfen.`);
+    else if (card.first_edition === false) items.push("1st Edition: kein Stempel erkannt.");
+    else if (v.firstEdition) items.push(`<span class="warn">1st Edition: nicht sicher erkennbar.</span> Bitte selbst prüfen.`);
+    if (finishSet) items.push(`Ausführung: ${esc(FIN_LABEL[finishSet] || finishSet)} erkannt, vorausgewählt.`);
+    else items.push(`<span class="warn">Ausführung: nicht sicher erkennbar.</span> Bitte prüfen.`);
+    if (v.normal && v.reverse && finishSet !== "reverse_holo") items.push("Diese Karte gibt es auch als Reverse Holo. Der Schimmer ist auf Fotos schwer zu sehen, bitte prüfen.");
+    items.push(`<span class="warn">Zustand bitte selbst wählen,</span> ein Foto reicht dafür nicht.`);
+    if (card.notes) items.push(`Hinweis der Erkennung: ${esc(card.notes)}`);
+    return `<div class="scanhint" role="note"><b>Scan-Ergebnis</b><ul>${items.map(x => `<li>${x}</li>`).join("")}</ul></div>`;
   }
 
   async function pick(id) {
@@ -1485,6 +1620,7 @@ function openAdd() {
         ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
         <div class="preview">
           ${s.imageUrl ? `<img src="${esc(s.imageUrl)}" alt="" data-tid="${esc((s.picked && s.picked.id) || "")}" onerror="imgFallback(this)">` : ""}
+          ${s.scan ? `<img class="scanmini" src="${esc(s.scan.photo)}" alt="Dein Foto">` : ""}
           <div>
             <h3>${esc(c.name)}</h3>
             <p class="muted">${esc(c.set && c.set.name || "")}${year}, Nr. ${esc(c.localId)}</p>
@@ -1492,6 +1628,7 @@ function openAdd() {
             <p class="muted dsmall">Den Wert liefert die nächste eBay-Abfrage (täglich früh).</p>
           </div>
         </div>
+        <div id="scanhint"></div>
         <label>Zustand<select id="cond">${condOptions("NM")}</select></label>
         <label>Menge<input id="qty" type="number" min="1" value="1" inputmode="numeric"></label>
         <label>Ausführung<select id="finish">${finishOptions(defFinish)}</select></label>
@@ -1501,6 +1638,19 @@ function openAdd() {
         <button id="save" class="primary wide">Zur Sammlung hinzufügen</button>
         <p class="err" id="saveerr"></p>`;
       $("#save", sheet).onclick = save;
+      if (s.scan) {
+        const sc = s.scan.card;
+        const possible = { holo: v.holo, reverse_holo: v.reverse, non_holo: v.normal };
+        const known = Object.values(possible).some(x => x !== undefined);
+        let finishSet = null;
+        if (["holo", "reverse_holo", "non_holo"].includes(sc.finish) && (!known || possible[sc.finish])) {
+          finishSet = sc.finish;
+          $("#finish", sheet).value = sc.finish;
+        }
+        const firstSet = sc.first_edition === true && v.firstEdition !== false;
+        if (firstSet) $("#first", sheet).checked = true;
+        $("#scanhint", sheet).innerHTML = scanHintHtml(sc, c, v, finishSet, firstSet);
+      }
       const back = $("#back", sheet);
       if (back) back.onclick = () => showResults(s.results);
     } catch (e) {
@@ -1549,7 +1699,10 @@ function openAdd() {
     }
     loadMain({ quiet: true });
     s.picked = null;
-    showResults(s.results, `${c.name} wurde hinzugefügt. Der eBay-Wert erscheint nach der nächsten Abfrage. Du kannst direkt die nächste Karte wählen.`);
+    const scanned = Boolean(s.scan);
+    s.scan = null;
+    if (scanned) s.results = [];
+    showResults(s.results, `${c.name} wurde hinzugefügt. Der eBay-Wert erscheint nach der nächsten Abfrage. ${scanned ? "Du kannst direkt die nächste Karte scannen." : "Du kannst direkt die nächste Karte wählen."}`);
     const q = $("#q", sheet);
     if (q) q.select();
   }
