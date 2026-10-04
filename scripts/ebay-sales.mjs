@@ -28,6 +28,9 @@ const CFG = {
   backfillRows: num(env.EBAY_BACKFILL_ROWS, 60),      // Zeilen je Karte beim ersten Laden
   updateRows: num(env.EBAY_UPDATE_ROWS, 15),          // Zeilen je Karte bei Aktualisierungen
   maxDetailPages: num(env.EBAY_MAX_DETAIL_PAGES, 150),
+  imageBudget: num(env.EBAY_IMAGE_BUDGET_USD, 0),     // Bilder nachholen: höchstens so viel pro Lauf (0 = aus)
+  imageMaxPages: num(env.EBAY_IMAGE_MAX_PAGES, 300),  // ... und höchstens so viele Detailseiten pro Lauf
+  imageMaxDays: num(env.EBAY_IMAGE_MAX_DAYS, 85),     // nur Verkäufe, die eBay noch zeigt (etwa 90 Tage)
   pollMs: num(env.EBAY_POLL_MS, 5000),
   pollMaxMs: num(env.EBAY_POLL_MAX_MS, 25 * 60 * 1000),
 };
@@ -254,6 +257,7 @@ async function main() {
   }
 
   const work = []; // { card, engineCard, row, sale, existingRow?, need: 'ok'|'detail' }
+  const imagePatch = new Map(); // gespeicherte Verkäufe, die nur ein Bild aus der neuen Suche bekommen
   for (const c of processed) {
     const ec = cardFromRow(c);
     const have = existing.get(c.id) || new Map();
@@ -262,7 +266,13 @@ async function main() {
       const sale = parseSale(row);
       if (!sale.soldAt) continue;
       const key = saleKey(sale);
-      if (have.has(key) || seen.has(key)) continue;
+      if (have.has(key)) {
+        // schon gespeichert: nichts überschreiben, nur ein fehlendes Bild aus der Suchzeile übernehmen
+        const old = have.get(key);
+        if (sale.image && !(old.parsed && old.parsed.image)) imagePatch.set(`${c.id}|${key}`, { ...old, parsed: { ...(old.parsed || {}), image: sale.image } });
+        continue;
+      }
+      if (seen.has(key)) continue;
       seen.add(key);
       work.push({ card: c, ec, row, sale, need: triage(ec, sale) });
     }
@@ -329,6 +339,8 @@ async function main() {
     const dbRow = toDbRow(w.card.id, sale, w.row);
     out.set(`${dbRow.card_id}|${saleKey(sale)}`, dbRow);
   }
+  for (const [k, r] of imagePatch) if (!out.has(k)) out.set(k, r);
+  if (imagePatch.size) log(`Bilder aus erneut gefundenen Verkäufen übernommen: ${imagePatch.size}.`);
   if (out.size) await upsert("ebay_sales", [...out.values()], "card_id,item_id,sold_at,price_eur");
   log(`${out.size} Verkäufe gespeichert oder aktualisiert.`);
 
@@ -336,6 +348,88 @@ async function main() {
     for (let i = 0; i < processed.length; i += 20) {
       const part = processed.slice(i, i + 20).map((c) => c.id).join(",");
       await sb(`cards?id=in.(${part})`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ ebay_checked_at: now.toISOString() }) });
+    }
+  }
+
+  /* 5b. Bilder nachholen (nur wenn EBAY_IMAGE_BUDGET_USD > 0): Detailseiten für gespeicherte Verkäufe ohne Bild.
+     Reihenfolge: wertvollste Karten zuerst; je Karte erst Verkäufe, die in den Wert oder die Zustandstabelle eingehen,
+     dann solche, die unter "Nicht berücksichtigt" stehen. Verkäufe anderer Karten, bewertete Karten und
+     Sammelangebote werden übersprungen. Nicht mehr abrufbare Angebote werden markiert und nicht erneut versucht. */
+  const estSoFar = () => stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow +
+    stats.detailRuns * COST.detailRun + stats.detailPages * COST.detailPage;
+  const imgBudget = Math.min(CFG.imageBudget, available - estSoFar() - 0.02);
+  if (CFG.imageBudget > 0 && CFG.apifyToken && imgBudget > COST.detailRun + COST.detailPage) {
+    const since = new Date(now - CFG.imageMaxDays * DAY).toISOString();
+    const noImg = await sbAll(`ebay_sales?select=card_id,item_id,sold_at,price_eur,title,url,parsed&excluded=eq.false&parsed->>image=is.null&parsed->>imageTried=is.null&sold_at=gte.${since}&order=sold_at.desc`);
+    const rowsByCard = new Map();
+    for (const r of noImg) { if (!rowsByCard.has(r.card_id)) rowsByCard.set(r.card_id, []); rowsByCard.get(r.card_id).push(r); }
+    const P1 = new Set(["condition"]);
+    const P2 = new Set(["language", "edition", "finish", "reverse_unproven", "unknown_condition", "unknown_language", "unknown_edition", "unknown_finish", "conflict"]);
+    const first = [], second = [];
+    for (const c of ranked) {
+      const rs = rowsByCard.get(c.id);
+      if (!rs) continue;
+      const sales = rs.map((r) => { const x = saleFromDb(r); x._row = r; return x; });
+      const res = matchCard(cardFromRow(c), sales, { now });
+      for (const x of res.used) first.push(x._row);
+      for (const { sale, reason } of res.rejected) (P1.has(reason) ? first : P2.has(reason) ? second : null)?.push(sale._row);
+    }
+    const ordered = [...first, ...second];
+    const wanted = [...new Set(ordered.map((r) => r.item_id))];
+    const pages = Math.max(0, Math.min(CFG.imageMaxPages, Math.floor((imgBudget - COST.detailRun) / COST.detailPage), wanted.length));
+    log(`Bilder nachholen: ${noImg.length} Verkäufe ohne Bild, davon ${wanted.length} Angebote wichtig; dieser Lauf holt ${pages}.`);
+    if (pages) {
+      const ids = wanted.slice(0, pages);
+      const got = new Map();
+      let ran = false;
+      try {
+        const { items, usd } = await runActor({
+          startUrls: ids.map((id) => ({ url: `https://www.ebay.de/itm/${id}` })),
+          marketplace: "ebay.de", detailedItems: true, maxItems: ids.length, proxy,
+        }, "Bilder nachholen", COST.detailRun + ids.length * COST.detailPage * 1.5);
+        ran = true;
+        stats.detailRuns++; stats.detailPages += ids.length;
+        if (usd !== null) { stats.apifyUsd += usd; stats.apifyUsdKnown = true; }
+        for (const it of items) if (it.itemId) got.set(String(it.itemId), it);
+        stats.ok++;
+      } catch (e) {
+        console.error(`Bilder nachholen fehlgeschlagen: ${e.message}`);
+        stats.failed++;
+      }
+      // Ein abgebrochener Lauf (Fehler) markiert nichts. Ein vollständiger Lauf zählt als Versuch, auch wenn er
+      // keine Seite liefert: Sonst würden verschwundene Angebote jede Nacht erneut bezahlt.
+      if (ran) {
+        const idSet = new Set(ids);
+        // Nicht gelieferte Angebote erst nach dem zweiten erfolglosen Versuch aufgeben (kurze Störungen)
+        const giveUp = (p) => { const n = (p.imageTries || 0) + 1; return n >= 2 ? { ...p, imageTries: n, imageTried: true } : { ...p, imageTries: n }; };
+        const fix = new Map();
+        let withImg = 0;
+        for (const r of ordered) {
+          if (!idSet.has(r.item_id)) continue;
+          const k = `${r.card_id}|${r.item_id}|${r.sold_at}|${r.price_eur}`;
+          if (fix.has(k)) continue;
+          const d = got.get(String(r.item_id));
+          const p = r.parsed || {};
+          let row;
+          if (d && p.hasDetail) {
+            // Merkmale stammen schon von einer Detailseite: nur das Bild ergänzen
+            const img = parseSale(rowFromDb(r), d).image;
+            row = { ...r, parsed: img ? { ...p, image: img } : giveUp(p) };
+          } else if (d) {
+            // erste Detailseite für diesen Verkauf: Merkmale und Bild neu lesen
+            const sale = parseSale(rowFromDb(r), d);
+            row = toDbRow(r.card_id, sale, rowFromDb(r));
+            if (!row.parsed.image) row.parsed = giveUp({ ...row.parsed, imageTries: p.imageTries });
+          } else {
+            row = { ...r, parsed: giveUp(p) }; // Angebot nicht geliefert: beim zweiten Mal aufgeben
+          }
+          if (row.parsed.image) withImg++;
+          fix.set(k, row);
+        }
+        if (fix.size) await upsert("ebay_sales", [...fix.values()], "card_id,item_id,sold_at,price_eur");
+        const gaveUp = [...fix.values()].filter((r) => r.parsed.imageTried).length;
+        log(`Bilder nachholen: ${withImg} Bilder ergänzt, ${fix.size - withImg - gaveUp} Verkäufe für einen zweiten Versuch vorgemerkt, ${gaveUp} aufgegeben.`);
+      }
     }
   }
 
@@ -361,7 +455,7 @@ async function main() {
 
   /* 7. Protokoll */
   const est = (stats.searchRuns ? stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow : 0) +
-    (stats.detailRuns ? COST.detailRun + stats.detailPages * COST.detailPage : 0);
+    stats.detailRuns * COST.detailRun + stats.detailPages * COST.detailPage;
   if (stats.searchRuns || stats.detailRuns || stats.failed) {
     await sb("ebay_runs", {
       method: "POST", headers: { Prefer: "return=minimal" },
