@@ -30,7 +30,7 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           # Kostenbremse in Dollar (Schätzung). Hier kannst du die Werte ändern.
-          EBAY_MONTH_BUDGET_USD: "38.0"
+          EBAY_MONTH_BUDGET_USD: "50.0"
           EBAY_RUN_BUDGET_USD: "5.0"
           EBAY_IMAGE_BUDGET_USD: "3.5"
           # die wertvollsten Karten wöchentlich, alle übrigen alle 28 Tage
