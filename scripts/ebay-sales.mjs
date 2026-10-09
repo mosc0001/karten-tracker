@@ -8,7 +8,7 @@
 //   5. Verkäufe speichern, dann für ALLE Karten den Wert neu berechnen (auch ohne neue Abfrage)
 
 import {
-  parseSale, matchCard, buildQuery, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey, queryKey, setIdOf,
+  parseSale, matchCard, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey, queryKey, setIdOf, numberVariants, autoQueries,
 } from "./ebay-logic.mjs";
 
 const env = process.env;
@@ -24,10 +24,10 @@ const CFG = {
   monthBudget: num(env.EBAY_MONTH_BUDGET_USD, 4.0),   // höchstens so viel pro Monat (Schätzung)
   topN: num(env.EBAY_TOP_N, 15),                      // die wertvollsten Karten ...
   topEveryDays: num(env.EBAY_TOP_EVERY_DAYS, 7),      // ... werden so oft abgefragt
-  restEveryDays: num(env.EBAY_REST_EVERY_DAYS, 28),   // alle übrigen so oft
-  backfillRows: num(env.EBAY_BACKFILL_ROWS, 60),      // Zeilen je Karte beim ersten Laden
-  updateRows: num(env.EBAY_UPDATE_ROWS, 15),          // Zeilen je Karte bei Aktualisierungen
-  maxDetailPages: num(env.EBAY_MAX_DETAIL_PAGES, 150),
+  restEveryDays: num(env.EBAY_REST_EVERY_DAYS, 14),   // alle übrigen so oft
+  backfillRows: num(env.EBAY_BACKFILL_ROWS, 240),     // Treffer je Suche beim ersten Laden (≈ volle 90 Tage)
+  updateRows: num(env.EBAY_UPDATE_ROWS, 15),          // mindestens so viele Treffer je Suche bei Aktualisierungen
+  maxDetailPages: num(env.EBAY_MAX_DETAIL_PAGES, 400),
   imageBudget: num(env.EBAY_IMAGE_BUDGET_USD, 0),     // Bilder nachholen: höchstens so viel pro Lauf (0 = aus)
   imageMaxPages: num(env.EBAY_IMAGE_MAX_PAGES, 300),  // ... und höchstens so viele Detailseiten pro Lauf
   imageMaxDays: num(env.EBAY_IMAGE_MAX_DAYS, 85),     // nur Verkäufe, die eBay noch zeigt (etwa 90 Tage)
@@ -128,8 +128,9 @@ async function runActor(input, label, capUsd) {
 const proxy = { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "DE" };
 const searchUrl = (q) => `https://www.ebay.de/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13`;
 const qKey = queryKey;
-const queryOf = (card) => (card.ebay_query && card.ebay_query.trim()) ||
-  buildQuery({ name: card.name, setName: card.set_name, setId: setIdOf(card), finish: card.finish || (card.foil ? "holo" : "non_holo") });
+// Suchbegriffe einer Karte: eigener Suchbegriff, sonst die beiden automatischen (Setname und Kartennummer)
+const queriesOf = (card) => (card.ebay_query && card.ebay_query.trim()) ? [{ q: card.ebay_query.trim(), src: "set" }]
+  : autoQueries(card).map((q, i) => ({ q, src: i === 0 ? "set" : "num" }));
 
 function rowQuery(r) {
   const skw = (r.basic_info && r.basic_info.skw) || null;
@@ -206,20 +207,54 @@ async function main() {
   const available = Math.max(0, Math.min(CFG.runBudget, CFG.monthBudget - spent));
   log(`Budget: Monat ${CFG.monthBudget.toFixed(2)} $, bisher ${spent.toFixed(2)} $, dieser Lauf höchstens ${available.toFixed(2)} $.`);
 
-  const estBackfill = COST.searchUrl + CFG.backfillRows * COST.searchRow + 0.5 * CFG.backfillRows * COST.detailPage;
-  const estUpdate = COST.searchUrl + CFG.updateRows * COST.searchRow + 0.25 * CFG.updateRows * COST.detailPage;
-  let budget = available - 2 * COST.searchRun - COST.detailRun;
-  const backfill = [], update = [];
+  // Wie viele Treffer braucht eine Suche? Aus den gespeicherten Verkäufen der letzten 90 Tage:
+  // Treffer pro Tag (Suche mit Setnamen: alle; Nummernsuche: Titel mit der eigenen Nummer) × Tage seit der
+  // letzten Abfrage, mit Puffer. Erstladen: volle 90 Tage, höchstens EBAY_BACKFILL_ROWS.
+  const BUCKETS = [...new Set([CFG.updateRows, 30, 60, 120, CFG.backfillRows])].filter((b) => b >= CFG.updateRows && b <= CFG.backfillRows).sort((a, b) => a - b);
+  const bucket = (n) => BUCKETS.find((b) => b >= n) || CFG.backfillRows;
+  const salesByCard = new Map();
+  if (CFG.apifyToken) {
+    for (const r of await sbAll(`ebay_sales?select=card_id,sold_at,title&sold_at=gte.${new Date(now - 90 * DAY).toISOString()}`)) {
+      if (!salesByCard.has(r.card_id)) salesByCard.set(r.card_id, []);
+      salesByCard.get(r.card_id).push(r);
+    }
+  }
+  const ratesOf = (c) => {
+    const rs = salesByCard.get(c.id) || [];
+    if (!rs.length) return null;
+    const earliest = Math.min(...rs.map((r) => new Date(r.sold_at).getTime()));
+    const span = Math.max(7, (now - earliest) / DAY);
+    const rx = numberVariants(c.card_number, c.set_total).length
+      ? new RegExp(`(^|[^0-9])0*${Number(c.card_number)}\\s*/\\s*0*${Number(c.set_total)}([^0-9]|$)`) : null;
+    return { set: rs.length / span, num: rx ? rs.filter((r) => rx.test(r.title || "")).length / span : 0 };
+  };
+  const searchesFor = (c) => {
+    const qs = queriesOf(c);
+    const rate = ratesOf(c);
+    const full = !c.ebay_checked_at;
+    const gap = full ? 90 : Math.min(90, (now - new Date(c.ebay_checked_at)) / DAY);
+    return qs.map(({ q, src }) => {
+      // expected: so viele Zeilen liefert Apify voraussichtlich (bezahlt wird nur, was geliefert wird);
+      // rows: angeforderte Obergrenze mit Puffer
+      const expected = rate ? Math.ceil(rate[src] * (full ? 90 : gap)) : 60;
+      const rows = full && !rate ? CFG.backfillRows : bucket(Math.ceil(expected * (full ? 1.3 : 1.5)) + 10);
+      return { card: c, q, src, rows, expected: Math.min(expected, rows), est: COST.searchUrl + Math.min(expected, rows) * COST.searchRow };
+    });
+  };
+
+  const detailShare = 0.25; // grob: Anteil neuer Treffer, der eine Detailseite braucht
+  let budget = available - (BUCKETS.length + 1) * COST.searchRun - COST.detailRun;
+  const backfill = [], update = [], searches = [];
   const isDue = (c, i) => !c.ebay_checked_at || now - new Date(c.ebay_checked_at) > (i < CFG.topN ? CFG.topEveryDays : CFG.restEveryDays) * DAY;
   const dueTotal = ranked.filter(isDue).length;
   if (CFG.apifyToken && budget > 0) {
     ranked.forEach((c, i) => {
-      const every = i < CFG.topN ? CFG.topEveryDays : CFG.restEveryDays;
-      const due = !c.ebay_checked_at || now - new Date(c.ebay_checked_at) > every * DAY;
-      if (!due) return;
-      const est = c.ebay_checked_at ? estUpdate : estBackfill;
+      if (!isDue(c, i)) return;
+      const ss = searchesFor(c);
+      const est = ss.reduce((a, x) => a + x.est + x.expected * detailShare * COST.detailPage, 0);
       if (est > budget) return;
       budget -= est;
+      searches.push(...ss);
       (c.ebay_checked_at ? update : backfill).push(c);
     });
   } else if (!CFG.apifyToken) {
@@ -227,17 +262,26 @@ async function main() {
   } else {
     log("Kein Budget mehr frei: Es wird nur neu gerechnet.");
   }
-  log(`Fällig und im Budget: ${backfill.length} zum ersten Laden, ${update.length} zum Aktualisieren.`);
+  log(`Fällig und im Budget: ${backfill.length} zum vollständigen Laden, ${update.length} zum Aktualisieren; ` +
+    `${searches.length} Suchen (${BUCKETS.map((b) => `${b} Treffer: ${searches.filter((x) => x.rows === b).length}`).join(", ")}).`);
 
-  /* 3. Gebündelte Suche je Gruppe */
-  const searchRowsByCard = new Map(); // cardId -> Suchzeilen
-  for (const [group, rows, label] of [[backfill, CFG.backfillRows, "Erstladen"], [update, CFG.updateRows, "Aktualisierung"]]) {
+  /* 3. Gebündelte Suche: ein Apify-Lauf je Trefferzahl */
+  const searchRowsByCard = new Map(); // cardId -> Suchzeilen (aus beiden Suchen, mit Herkunft)
+  const requested = new Map();        // cardId -> angeforderte Treffer der Setnamen-Suche (für den Lücken-Wächter)
+  for (const x of searches) if (x.src === "set") requested.set(x.card.id, x.rows);
+  for (const rows of BUCKETS) {
+    const group = searches.filter((x) => x.rows === rows);
     if (!group.length) continue;
+    const label = `Suche (${rows} Treffer)`;
     const byQ = new Map();
-    for (const c of group) { const q = queryOf(c); const k = qKey(q); if (!byQ.has(k)) byQ.set(k, { q, cards: [] }); byQ.get(k).cards.push(c); }
+    for (const x of group) {
+      const k = qKey(x.q);
+      if (!byQ.has(k)) byQ.set(k, { q: x.q, items: [] });
+      byQ.get(k).items.push(x);
+    }
     const urls = [...byQ.values()].map((x) => ({ url: searchUrl(x.q) }));
     try {
-      log(`${label}: ${urls.length} Suchen in einem Lauf (je ${rows} Zeilen) ...`);
+      log(`${label}: ${urls.length} Suchen in einem Lauf ...`);
       const spentSoFar = stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow;
       const { items, usd } = await runActor({ startUrls: urls, marketplace: "ebay.de", detailedItems: false, maxItems: rows, proxy }, label, available - spentSoFar);
       stats.searchRuns++; stats.urls += urls.length;
@@ -251,7 +295,15 @@ async function main() {
         if (!rowsByQ.has(k)) rowsByQ.set(k, []);
         rowsByQ.get(k).push(it);
       }
-      for (const [k, x] of byQ) for (const c of x.cards) { searchRowsByCard.set(c.id, rowsByQ.get(k) || []); stats.cards++; }
+      for (const [k, x] of byQ) {
+        const got = rowsByQ.get(k) || [];
+        for (const s0 of x.items) {
+          if (!searchRowsByCard.has(s0.card.id)) { searchRowsByCard.set(s0.card.id, []); stats.cards++; }
+          searchRowsByCard.get(s0.card.id).push(...got.map((r) => ({ ...r, _src: s0.src })));
+        }
+      }
+      const maxGot = Math.max(0, ...[...rowsByQ.values()].map((v) => v.length));
+      if (rows > 100 && maxGot <= 100 && maxGot > 0) log(`Hinweis: ${rows} Treffer angefordert, Apify lieferte höchstens ${maxGot} je Suche.`);
       stats.ok++;
     } catch (e) {
       console.error(`${label} fehlgeschlagen: ${e.message}`);
@@ -272,10 +324,16 @@ async function main() {
 
   const work = []; // { card, engineCard, row, sale, existingRow?, need: 'ok'|'detail' }
   const imagePatch = new Map(); // gespeicherte Verkäufe, die nur ein Bild aus der neuen Suche bekommen
+  // Lücken-Wächter: Hat eine Aktualisierung die angeforderten Treffer ausgeschöpft, ohne einen schon
+  // gespeicherten Verkauf zu erreichen, fehlt dazwischen etwas. Die Karte wird beim nächsten Lauf voll geladen.
+  const gapCards = new Set();
   for (const c of processed) {
     const ec = cardFromRow(c);
     const have = existing.get(c.id) || new Map();
     const seen = new Set();
+    const setRows = searchRowsByCard.get(c.id).filter((r) => r._src === "set");
+    if (c.ebay_checked_at && have.size && setRows.length >= (requested.get(c.id) || Infinity) &&
+        !setRows.some((r) => { const sl = parseSale(r); return sl.soldAt && have.has(saleKey(sl)); })) gapCards.add(c.id);
     for (const row of searchRowsByCard.get(c.id)) {
       const sale = parseSale(row);
       if (!sale.soldAt) continue;
@@ -359,9 +417,14 @@ async function main() {
   log(`${out.size} Verkäufe gespeichert oder aktualisiert.`);
 
   if (processed.length) {
-    for (let i = 0; i < processed.length; i += 20) {
-      const part = processed.slice(i, i + 20).map((c) => c.id).join(",");
+    const okCards = processed.filter((c) => !gapCards.has(c.id));
+    for (let i = 0; i < okCards.length; i += 20) {
+      const part = okCards.slice(i, i + 20).map((c) => c.id).join(",");
       await sb(`cards?id=in.(${part})`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ ebay_checked_at: now.toISOString() }) });
+    }
+    if (gapCards.size) {
+      await sb(`cards?id=in.(${[...gapCards].join(",")})`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ ebay_checked_at: null }) });
+      log(`Lücken-Wächter: ${gapCards.size} Karte(n) beim nächsten Lauf vollständig laden.`);
     }
   }
 
