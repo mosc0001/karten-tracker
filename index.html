@@ -874,6 +874,111 @@ async function writeSnapshot(card, result, hadValue) {
   return !error;
 }
 
+/* ---------- Sprachwechsel ---------- */
+// Bildadresse, die die App selbst gesetzt hat (nicht von dir eingetragen)
+const isAutoImage = u => !u || /^https:\/\/(assets\.tcgdex\.net|images\.pokemontcg\.io)\//i.test(u);
+
+// Name, Set und Bild in der neuen Sprache laden; die Karte fällig stellen und die alten Verkäufe
+// zum Verwerfen vormerken (das Löschen erledigt der Nachtjob, die App darf keine Verkäufe löschen).
+async function languagePatch(c, lang, patch) {
+  const label = lang === "EN" ? "Englisch" : "Deutsch";
+  let t = null;
+  if (c.tcgdex_id) {
+    try { t = await tcg(`${lang.toLowerCase()}/cards/${encodeURIComponent(c.tcgdex_id)}`); } catch (e) { t = null; }
+  }
+  const lines = [`Sprache auf ${label} umstellen?`];
+  if (t && t.name) lines.push(`Neuer Name: ${t.name}${t.set && t.set.name ? ` (${t.set.name})` : ""}.`);
+  else lines.push(`TCGdex kennt diese Karte nicht auf ${label}. Der Name „${c.name}“ bleibt. Trage notfalls einen eigenen eBay-Suchbegriff ein.`);
+  lines.push("Die bisherigen eBay-Verkäufe dieser Karte werden beim nächsten Lauf verworfen und neu gesucht.");
+  if ((patch.ebay_query !== undefined ? patch.ebay_query : c.ebay_query)) lines.push("Dein eigener eBay-Suchbegriff bleibt bestehen, bitte prüfe ihn.");
+  if (!confirm(lines.join("\n\n"))) return null;
+  const out = {
+    language: lang,
+    ebay_checked_at: null,
+    tcg_meta: { ...(c.tcg_meta || {}), salesReset: new Date().toISOString() },
+  };
+  if (t && t.name) {
+    out.name = t.name;
+    if (t.set && t.set.name) out.set_name = t.set.name;
+    if (patch.image_url === undefined && isAutoImage(c.image_url)) {
+      const img = await imageFor(c.tcgdex_id, lang, t.image).catch(() => null);
+      if (img) out.image_url = img;
+    }
+  }
+  return out;
+}
+
+// Wert sofort zurücksetzen, bis die Karte in der neuen Sprache gesucht wurde
+async function clearSnapshot(c) {
+  if (!(state.latest[c.id] || {}).ebay_sold) return;
+  await db.from("price_snapshots").upsert(
+    { card_id: c.id, captured_on: today(), source: "ebay_sold", price_eur: 0, details: { none: true, n: 0, counts: false } },
+    { onConflict: "card_id,captured_on,source" });
+}
+
+/* ---------- Export ---------- */
+function downloadFile(name, text, type) {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+const STATUS_LABEL = { counted: "belastbar", prov: "vorläufig", nomatch: "kein passender Verkauf", unchecked: "noch nicht abgefragt" };
+const FIN_TEXT = { non_holo: "Normal", holo: "Holo", reverse_holo: "Reverse Holo" };
+
+// Karten als CSV für Excel: Semikolon, Dezimalkomma, UTF-8 mit BOM
+function exportCsv() {
+  const num = v => v == null || Number.isNaN(v) ? "" : Number(v).toFixed(2).replace(".", ",");
+  const txt = v => {
+    let x = String(v ?? "");
+    if (/^[=+\-@]/.test(x)) x = "'" + x; // keine Formeln in Excel auslösen
+    return /[;"\n\r]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
+  };
+  const head = ["Name", "Set", "Jahr", "Nummer", "Sprache", "Zustand", "Ausführung", "1st Edition", "Menge",
+    "Kaufpreis pro Karte (€)", "Wert pro Karte (€)", "Wert gesamt (€)", "Gewinn/Verlust (€)", "Status", "Verkäufe",
+    "Grundlage", "Wertstand", "eBay-Suchbegriff", "TCGdex-ID", "Hinzugefügt am"];
+  const rows = cardRows().sort((a, b) => (b.total ?? -1) - (a.total ?? -1)).map(r => {
+    const c = r.c, e = r.e;
+    const pp = c.purchase_price_eur != null ? Number(c.purchase_price_eur) : null;
+    return [
+      txt(c.name), txt(c.set_name), txt(c.set_name ? setYear(c.set_name) : ""), txt(c.card_number), txt(c.language), txt(c.condition),
+      txt(FIN_TEXT[finishOf(c)] || ""), c.first_edition ? "ja" : "nein", c.quantity,
+      num(pp), num(r.unit), num(r.total), num(pp != null && r.unit != null ? (r.unit - pp) * c.quantity : null),
+      txt(STATUS_LABEL[facetOf("status", r)]), e ? e.n : "", txt(e ? e.basis : ""), txt(e ? fmtDate(e.date) : ""),
+      txt(c.ebay_query || ""), txt(c.tcgdex_id || ""), txt(c.created_at ? fmtDate(String(c.created_at).slice(0, 10)) : ""),
+    ].join(";");
+  });
+  downloadFile(`karten-tracker-${today()}.csv`, "\uFEFF" + [head.join(";"), ...rows].join("\r\n"), "text/csv;charset=utf-8");
+  setStatusText(`${rows.length} Einträge als CSV exportiert.`);
+}
+
+// Komplette Sicherung: Karten, gespeicherte eBay-Verkäufe und Preisverlauf
+async function exportBackup() {
+  const all = async (table, cols) => {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await db.from(table).select(cols).order("id", { ascending: true }).range(from, from + 999);
+      if (error) throw new Error(`${table}: ${error.message}`);
+      out.push(...data);
+      setStatusText(`Sicherung wird erstellt … ${table}: ${out.length}`);
+      if (data.length < 1000) return out;
+    }
+  };
+  try {
+    const cards = await all("cards", "*");
+    const sales = await all("ebay_sales", "*");
+    const snaps = await all("price_snapshots", "*");
+    const backup = { app: "karten-tracker", version: 1, exportedAt: new Date().toISOString(), cards, ebay_sales: sales, price_snapshots: snaps };
+    downloadFile(`karten-tracker-sicherung-${today()}.json`, JSON.stringify(backup), "application/json");
+    setStatusText(`Sicherung erstellt: ${cards.length} Karten, ${sales.length} Verkäufe, ${snaps.length} Preisstände.`);
+  } catch (e) {
+    setStatusText("Sicherung fehlgeschlagen: " + e.message);
+  }
+}
+function setStatusText(t) { const el = $("#status"); if (el) el.textContent = t; }
+
 /* ---------- Anmeldung ---------- */
 
 function renderLogin(msg = "") {
@@ -1236,6 +1341,8 @@ function renderMain() {
           <div class="menuwrap">
             <button id="menubtn" class="iconbtn" aria-label="Menü" title="Menü" aria-haspopup="true" aria-expanded="false">${ICON_MORE}</button>
             <div id="menu" class="menu" role="menu" hidden>
+              <button role="menuitem" id="expcsv">Karten als CSV exportieren</button>
+              <button role="menuitem" id="expbak">Komplette Sicherung (JSON)</button>
               <button role="menuitem" id="logout">Abmelden</button>
               <a role="menuitem" href="https://github.com/mosc0001/karten-tracker/actions/workflows/ebay.yml" target="_blank" rel="noopener">eBay-Abfrage starten (GitHub)</a>
             </div>
@@ -1277,6 +1384,8 @@ function renderMain() {
   });
   $("#addtop").onclick = openAdd;
   $("#logout").onclick = () => db.auth.signOut();
+  $("#expcsv").onclick = () => { closeMenu(); exportCsv(); };
+  $("#expbak").onclick = () => { closeMenu(); exportBackup(); };
   const mb = $("#menubtn"), menu = $("#menu");
   mb.onclick = e => {
     e.stopPropagation();
@@ -1973,6 +2082,7 @@ async function openDetail(id) {
   const e0 = ebayOf(c);
   const pp = c.purchase_price_eur != null ? Number(c.purchase_price_eur) : null;
   const year = c.set_name ? setYear(c.set_name) : "";
+  const langReset = Boolean(c.tcg_meta && c.tcg_meta.salesReset);
   const big = c.image_url ? c.image_url.replace(/\/low\.(webp|png|jpg)$/, "/high.$1") : null;
 
   const sheet = openSheet(`
@@ -1990,6 +2100,7 @@ async function openDetail(id) {
     </div>
     <section class="dsec">
       <h3>Preise nach Zustand</h3>
+      ${langReset ? `<p class="note" role="note">Sprache geändert: Die Verkäufe der bisherigen Suche werden beim nächsten Lauf verworfen, die Karte wird in der neuen Sprache neu gesucht.</p>` : ""}
       <div id="bycond"><p class="muted dsmall">Wird geladen …</p></div>
     </section>
     <section class="dsec">
@@ -2009,7 +2120,8 @@ async function openDetail(id) {
         <label>Menge<input id="qty" type="number" min="1" value="${c.quantity}" inputmode="numeric"></label>
         <label>Kaufpreis pro Karte in €<input id="pp" type="number" min="0" step="0.01" inputmode="decimal" value="${pp != null ? pp : ""}" placeholder="optional"></label>
         <label class="check fcheck"><input id="first" type="checkbox"${c.first_edition ? " checked" : ""}> 1st Edition</label>
-        <label class="fwide">Sprache der Karte<select id="lang"><option value="DE"${c.language === "DE" ? " selected" : ""}>Deutsch</option><option value="EN"${c.language === "EN" ? " selected" : ""}>Englisch</option></select></label>
+        <label class="fwide">Sprache der Karte<select id="lang"><option value="DE"${c.language === "DE" ? " selected" : ""}>Deutsch</option><option value="EN"${c.language === "EN" ? " selected" : ""}>Englisch</option></select>
+          <small class="muted">Beim Wechsel übernimmt die App Name und Bild in der neuen Sprache. Die bisherigen eBay-Verkäufe werden verworfen und die Karte neu gesucht.</small></label>
         <label class="fwide">Bildadresse (leer = automatisch)<input id="imgurl" type="url" value="${esc(c.image_url || "")}" placeholder="https://… (Adresse eines Kartenbilds)" autocomplete="off"></label>
         <label class="fwide">eBay-Suchbegriff (leer = automatisch)<input id="eq" type="text" value="${esc(c.ebay_query || "")}" placeholder="${esc(EBAY.buildQuery({ name: c.name, setName: c.set_name, setId: EBAY.setIdOf(c), finish: finishOf(c) }))}" autocomplete="off"></label>
       </div>
@@ -2189,7 +2301,7 @@ async function openDetail(id) {
     const bc = $("#bycond", sheet);
     if (bc) bc.innerHTML = `<p class="muted dsmall">Ohne geladene Verkäufe gibt es keine Preise nach Zustand.</p>`;
   } else {
-    rows = loaded.data || [];
+    rows = langReset ? [] : (loaded.data || []);
     renderSales();
   }
 
@@ -2206,12 +2318,17 @@ async function openDetail(id) {
     const fin = $("#finish", sheet).value;
     if (fin !== finishOf(c)) { patch.finish = fin; patch.foil = fin !== "non_holo"; }
     const lang = $("#lang", sheet).value;
-    if (lang !== c.language) patch.language = lang;
     const iu = $("#imgurl", sheet).value.trim();
     if (iu && !/^https:\/\//i.test(iu)) { $("#derr", sheet).textContent = "Die Bildadresse muss mit https:// beginnen."; return; }
     if ((iu || null) !== (c.image_url || null)) patch.image_url = iu || null;
     const q = $("#eq", sheet).value.trim();
     if ((q || null) !== (c.ebay_query || null)) { patch.ebay_query = q || null; patch.ebay_checked_at = null; } // neuer Suchbegriff: beim nächsten Lauf sofort abfragen
+    const langChanged = lang !== c.language;
+    if (langChanged) {
+      const lp = await languagePatch(c, lang, patch);
+      if (!lp) return; // abgebrochen
+      Object.assign(patch, lp);
+    }
     if (needsUpdate4()) { $("#derr", sheet).textContent = UPDATE4_MSG; return; }
     const { error } = await db.from("cards").update(patch).eq("id", id);
     if (error) {
@@ -2222,7 +2339,8 @@ async function openDetail(id) {
         : "Speichern fehlgeschlagen: " + error.message;
       return;
     }
-    if (rows) await writeSnapshot({ ...c, ...patch }, compute({ ...c, ...patch }), Boolean((state.latest[id] || {}).ebay_sold));
+    if (langChanged) await clearSnapshot(c);
+    else if (rows) await writeSnapshot({ ...c, ...patch }, compute({ ...c, ...patch }), Boolean((state.latest[id] || {}).ebay_sold));
     closeSheet();
     await loadMain({ quiet: true });
   };
