@@ -188,7 +188,8 @@ export function parseSale(row, detail = null) {
     currency: row.currency || (detail && detail.currency) || "EUR",
     soldAt: row.soldAt ? new Date(row.soldAt).toISOString() : parseSoldAt(row, detail),
     format: row.buyingFormat || (detail && detail.buyingFormat) || null,
-    priceUncertain: Boolean(row.priceIsAskingPrice || row.bestOfferAccepted),
+    // Preisvorschlag angenommen: Gezahlt wurde womöglich weniger. Bei Auktionen ist der Preis das echte Höchstgebot.
+    priceUncertain: (row.buyingFormat || (detail && detail.buyingFormat)) !== "auction" && Boolean(row.priceIsAskingPrice || row.bestOfferAccepted),
     hasDetail: Boolean(detail),
     graded, gradedReason,
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
@@ -441,6 +442,7 @@ export function toDbRow(cardId, sale, row) {
 export function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
   if (!facts.finish) facts.finish = finishFromText(r.title || "");
+  if (facts.format === "auction") facts.priceUncertain = false; // ältere Zeilen: Auktionspreis ist echt
   return { ...facts, itemId: r.item_id, title: r.title, url: r.url, price: Number(r.price_eur), soldAt: new Date(r.sold_at).toISOString(), currency: "EUR" };
 }
 
