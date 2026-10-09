@@ -223,12 +223,31 @@ const ownNumberIn = (card, toks) => {
     (want.prefix || !card.setTotal || k.den === Number(card.setTotal)));
 };
 
+// Kartennummern ohne "/Setgröße" im Titel: "#25", "Nr. 25", "No. 25", "Promo 25", "25 Promo", "(WP 25)".
+// Bei Promo-Karten zählt auch eine alleinstehende Zahl ("Pikachu 27 Wizards Black Star Promos"),
+// außer Jahreszahlen und Angaben wie "40 KP".
+function looseNumbers(card, t) {
+  const out = [];
+  for (const m of t.matchAll(/(?:#|\bnr\.?|\bno\.?|\bnummer|\bpromos?)\s*0*(\d{1,3})\b|\b0*(\d{1,3})\s*promos?\b|\(\s*[a-z]{1,4}\s*0*(\d{1,3})\s*\)/g)) {
+    out.push(Number(m[1] ?? m[2] ?? m[3]));
+  }
+  if (!out.length && isPromoSet(card.setName, card.setId)) {
+    const t2 = t.replace(/\b\d+\s*(kp|hp|ps|pv|x)\b/g, " ").replace(/\b(19|20)\d\d\b/g, " ").replace(/\b\d+\s*x\b|\bx\s*\d+\b/g, " ");
+    for (const m of t2.matchAll(/(?:^|[^a-z0-9])0*(\d{1,3})(?=$|[^a-z0-9])/g)) out.push(Number(m[1]));
+  }
+  return out;
+}
+
 // Gehört der Verkauf zu genau dieser Karte? Nummern mit Buchstaben (H3/H32) sind eine andere Karte als 3/147.
 function relevant(card, sale) {
   const t = norm(sale.title);
   const want = parseNumber(card.number);
   const toks = numberTokens(sale.title);
   if (toks.length) return ownNumberIn(card, toks);
+  if (!want.prefix && Number.isFinite(want.num)) {
+    const loose = looseNumbers(card, t);
+    if (loose.length) return loose.includes(want.num) && nameIn(card, t);
+  }
   // ohne "x/y": Buchstaben-Nummern wie "H29" allein im Titel
   const lone = [...t.matchAll(/\b([a-z]{1,5})\s?0*(\d{1,3})\b/g)].filter((m) => m[1] === want.prefix || (!want.prefix && m[1] === "h"));
   if (want.prefix) {
@@ -237,8 +256,13 @@ function relevant(card, sale) {
   } else if (lone.length) {
     return false; // Titel nennt eine Holo-Nummer (H..), deine Karte hat keine
   }
+  return nameIn(card, t);
+}
+
+function nameIn(card, t) {
   const words = norm(card.name).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
-  return words.length > 0 && words.some((w) => t.includes(w));
+  if (!words.length) return t.includes(norm(card.name).trim()); // kurze Namen wie Ho-oh, Mew
+  return words.some((w) => t.includes(w));
 }
 
 function onlyFinish(card) {
@@ -391,13 +415,47 @@ export function setIdOf(c) {
   return (c.tcg_meta && c.tcg_meta.setId) || (c.tcgdex_id ? String(c.tcgdex_id).replace(/-[^-]+$/, "") : null);
 }
 
+// Promo-Sets: Auf den Karten steht keine Setgröße, Verkäufer schreiben "Promo 4" oder "#4", nie "4/53"
+const PROMO_SETS = new Set(["basep", "np", "dpp", "hgssp", "bwp", "xyp", "smp", "swshp", "svp"]);
+export const isPromoSet = (setName, setId) => /promo/i.test(setName || "") || PROMO_SETS.has(setId || "");
+
+// Schreibweisen der Kartennummer, wie Verkäufer sie in Titel schreiben: 6/62, 06/62, 006/062
+export function numberVariants(number, setTotal) {
+  const m = String(number ?? "").trim().match(/^0*(\d{1,3})$/);
+  const t = Number(setTotal);
+  if (!m || !Number.isInteger(t) || t < 1 || t > 999) return [];
+  const n = Number(m[1]), ts = String(t);
+  return [...new Set([`${n}/${t}`, `${String(n).padStart(2, "0")}/${t}`, `${String(n).padStart(ts.length, "0")}/${t}`,
+    `${String(n).padStart(3, "0")}/${ts.padStart(3, "0")}`])];
+}
+
+const EXCLUDE = " -PSA -BGS -CGC -GSG -SGC -Beckett -graded -bewertet -slab -lot -bundle";
+
+// Suche 1: Name + Setbegriffe. Findet auch Titel ohne Kartennummer (gemessen gut jeder siebte passende Verkauf).
 export function buildQuery(card) {
   const terms = card.setId && SET_TERMS[card.setId];
   const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : card.setName;
   // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
-  const base = [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : ""].filter(Boolean).join(" ");
-  return base + " -PSA -BGS -CGC -GSG -SGC -Beckett -graded -bewertet -slab -lot -bundle";
+  return [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : ""].filter(Boolean).join(" ") + EXCLUDE;
 }
+
+// Suche 2: Name + Kartennummer. Trifft fast nur die eigene Karte und reicht dadurch viel weiter zurück
+// (getestet: Haunter Fossil, 60 Treffer = 71 statt 33 Tage). Nicht für Promos und Nummern mit Buchstaben.
+export function buildNumberQuery(card) {
+  if (isPromoSet(card.setName, card.setId)) return null;
+  const nums = numberVariants(card.number, card.setTotal);
+  if (!nums.length) return null;
+  return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : ""].filter(Boolean).join(" ") + EXCLUDE;
+}
+
+// Automatische Suchbegriffe einer Karte aus der Datenbank (Job und App nutzen dieselben). Beide Suchen laufen,
+// die Ergebnisse werden zusammengeführt; doppelte Treffer erkennt der Job an der Artikelnummer.
+export function autoQueries(c) {
+  const card = { name: c.name, setName: c.set_name, setId: setIdOf(c), number: c.card_number, setTotal: c.set_total,
+    finish: c.finish || (c.foil ? "holo" : "non_holo") };
+  return [buildQuery(card), buildNumberQuery(card)].filter(Boolean);
+}
+export const autoQuery = (c) => autoQueries(c)[0];
 
 // Vergleichsschlüssel für Suchbegriffe: Groß-/Kleinschreibung, Klammern, Kommas und Reihenfolge spielen keine Rolle.
 // So werden Ergebnisse auch dann der richtigen Karte zugeordnet, wenn eBay den Suchbegriff leicht umformatiert zurückgibt.
@@ -416,6 +474,7 @@ export function cardFromRow(c) {
     number: c.card_number,
     setTotal: c.set_total || null,
     setName: c.set_name || "",
+    setId: setIdOf(c),
     language: c.language,
     condition: c.condition,
     finish: c.finish || (c.foil ? "holo" : "non_holo"),
