@@ -2026,9 +2026,10 @@ const shortDate = iso => new Date(iso).toLocaleDateString("de-DE", { day: "2-dig
 // Mit epid leitet eBay bei nicht mehr verfügbaren Angeboten auf die allgemeine Produktseite um.
 function ebayItemUrl(itemId, url) {
   const id = String(itemId || "");
-  if (/^\d{1,20}$/.test(id)) return `https://www.ebay.de/itm/${id}`;
+  // nordt=true: eBay zeigt das beendete Angebot selbst, statt auf die allgemeine Produktseite umzuleiten
+  if (/^\d{1,20}$/.test(id)) return `https://www.ebay.de/itm/${id}?nordt=true`;
   const m = String(url || "").match(/^https:\/\/www\.ebay\.[a-z.]+\/itm\/(?:[^/?#]*\/)?(\d{1,20})/i);
-  if (m) return `https://www.ebay.de/itm/${m[1]}`;
+  if (m) return `https://www.ebay.de/itm/${m[1]}?nordt=true`;
   return /^https:\/\/www\.ebay\.[a-z.]+\//i.test(url || "") ? String(url).split(/[?#]/)[0] : "#";
 }
 // Vorschaubild nur von eBays Bildserver; Größe über den Dateinamen (s-l225 klein, s-l1600 groß)
