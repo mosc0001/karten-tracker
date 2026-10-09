@@ -153,8 +153,22 @@ async function main() {
   const cards = await sbAll("cards?select=id,name,set_name,card_number,language,condition,finish,foil,first_edition,quantity,tcgdex_id,ebay_query,set_total,tcg_meta,ebay_checked_at&order=created_at");
   log(`${cards.length} Karten.`);
 
+  // Sprachwechsel in der App: Verkäufe der alten Suche verwerfen (die App selbst darf nicht löschen).
+  // Die Karte ist von der App schon fällig gestellt und wird unten neu gesucht.
+  const resets = cards.filter((c) => c.tcg_meta && c.tcg_meta.salesReset);
+  if (resets.length) {
+    await sb(`ebay_sales?card_id=in.(${resets.map((c) => c.id).join(",")})`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    for (const c of resets) {
+      const { salesReset, ...meta } = c.tcg_meta;
+      const next = Object.keys(meta).length ? meta : null;
+      await sb(`cards?id=eq.${c.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ tcg_meta: next }) });
+      c.tcg_meta = next;
+    }
+    log(`Sprachwechsel: Verkäufe von ${resets.length} Karte(n) verworfen, sie werden neu gesucht.`);
+  }
+
   // Kartenanzahl und Ausführungen von TCGdex nachtragen (kostenlos)
-  const needMeta = cards.filter((c) => c.tcgdex_id && !c.tcg_meta).slice(0, 80);
+  const needMeta = cards.filter((c) => c.tcgdex_id && (!c.tcg_meta || !("setId" in c.tcg_meta))).slice(0, 80);
   await pool(4, needMeta, async (c) => {
     try {
       const res = await fetch(`https://api.tcgdex.net/v2/${c.language.toLowerCase()}/cards/${encodeURIComponent(c.tcgdex_id)}`);
@@ -162,7 +176,7 @@ async function main() {
       const t = await res.json();
       const patch = {
         set_total: (t.set && t.set.cardCount && t.set.cardCount.official) || null,
-        tcg_meta: { variants: t.variants || null, setId: (t.set && t.set.id) || null },
+        tcg_meta: { ...(c.tcg_meta || {}), variants: t.variants || null, setId: (t.set && t.set.id) || null },
       };
       await sb(`cards?id=eq.${c.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) });
       Object.assign(c, patch);
