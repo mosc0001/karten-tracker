@@ -106,6 +106,26 @@ function pickImage(row, detail) {
   return null;
 }
 
+/* ---------- Angenommener Preisvorschlag ---------- */
+// eBay zeigt auf der Detailseite den gezahlten Betrag und daneben den durchgestrichenen Angebotspreis. Apify liefert
+// den gezahlten Betrag im Feld taxExclusivePrice der Angebotsdaten (geprüft an sieben Angeboten aus DE, UK und USA,
+// privat und gewerblich). Bei Angeboten in fremder Währung mit Einfuhrumsatzsteuer schlägt eBay 19 % auf "price" auf,
+// taxExclusivePrice enthält sie nicht; das wird herausgerechnet. Ergebnis: Anteil des gezahlten Betrags am Angebotspreis.
+// Angebote mit mehreren Varianten werden nicht ausgewertet. Bei Euro-Angeboten gewerblicher Händler, die nicht
+// über einen Preisvorschlag verkauft wurden, steht im Feld der Nettopreis (Anteil 1/1,19): dann gilt der Wert als unklar.
+export function offerRatio(detail) {
+  const iv = detail && detail.vls && detail.vls.listing && detail.vls.listing.itemVariations;
+  if (!Array.isArray(iv) || iv.length !== 1) return null;
+  const ps = (iv[0] && iv[0].priceSettings) || {};
+  const p = Number(ps.price && ps.price.value), t = Number(ps.taxExclusivePrice && ps.taxExclusivePrice.value);
+  if (!(p > 0) || !(t > 0)) return null;
+  if (ps.price.currency && ps.taxExclusivePrice.currency && ps.price.currency !== ps.taxExclusivePrice.currency) return null;
+  const foreign = Boolean(ps.price.convertedFromCurrency) || (ps.exchangeRate && Number(ps.exchangeRate.value) !== 1);
+  const r = t / (foreign && ps.includedVATInPrices ? p / 1.19 : p);
+  if (!foreign && ps.includedVATInPrices && Math.abs(r - 1 / 1.19) < 0.002) return null;
+  return r;
+}
+
 /* ========================================================================
    parseSale: aus einer Suchzeile (und, falls vorhanden, der Artikelseite) die Merkmale lesen
    ======================================================================== */
@@ -179,7 +199,17 @@ export function parseSale(row, detail = null) {
   if (!finish) finish = finishFromText(featureText);
   if (!finish) finish = finishFromText(title);
 
-  const price = Number(row.priceValue ?? (detail && detail.priceValue));
+  const askPrice = Number(row.priceValue ?? (detail && detail.priceValue));
+  const format = row.buyingFormat || (detail && detail.buyingFormat) || null;
+  // Preisvorschlag angenommen: Die Suche zeigt nur den Angebotspreis. Den gezahlten Betrag liefert die Detailseite.
+  // Bei Auktionen ist der Preis immer das echte Höchstgebot.
+  const bestOffer = format !== "auction" && Boolean(row.priceIsAskingPrice || row.bestOfferAccepted);
+  let offerPrice = null;
+  if (bestOffer && detail) {
+    const r = offerRatio(detail);
+    if (r != null && r >= 0.2 && r < 0.995) offerPrice = Math.round(askPrice * r * 100) / 100;
+  }
+  const price = offerPrice ?? askPrice;
   return {
     itemId: String(row.itemId),
     url: row.itemId ? `https://www.ebay.de/itm/${row.itemId}` : row.url || null,
@@ -187,9 +217,12 @@ export function parseSale(row, detail = null) {
     price,
     currency: row.currency || (detail && detail.currency) || "EUR",
     soldAt: row.soldAt ? new Date(row.soldAt).toISOString() : parseSoldAt(row, detail),
-    format: row.buyingFormat || (detail && detail.buyingFormat) || null,
-    // Preisvorschlag angenommen: Gezahlt wurde womöglich weniger. Bei Auktionen ist der Preis das echte Höchstgebot.
-    priceUncertain: (row.buyingFormat || (detail && detail.buyingFormat)) !== "auction" && Boolean(row.priceIsAskingPrice || row.bestOfferAccepted),
+    format,
+    // Preisvorschlag ohne bekannten Betrag: gezahlt wurde womöglich weniger als der Angebotspreis
+    priceUncertain: bestOffer && offerPrice == null,
+    // Preisvorschlag mit Betrag: price ist der gezahlte Betrag, askingPrice der durchgestrichene Angebotspreis
+    offerPrice, askingPrice: offerPrice != null ? askPrice : null,
+    offerChecked: bestOffer && Boolean(detail),
     hasDetail: Boolean(detail),
     graded, gradedReason,
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
@@ -497,7 +530,7 @@ export function toDbRow(cardId, sale, row) {
     card_id: cardId,
     item_id: itemId,
     sold_at: soldAt,
-    price_eur: price,
+    price_eur: facts.askingPrice ?? price, // immer der Angebotspreis aus der Suche (Teil des Tabellenschlüssels)
     title,
     url: url || null,
     parsed: { ...facts, raw: { condition: row.condition ?? null, buyingFormat: row.buyingFormat ?? null, priceIsAskingPrice: Boolean(row.priceIsAskingPrice), bestOfferAccepted: Boolean(row.bestOfferAccepted) } },
@@ -509,7 +542,9 @@ export function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
   if (!facts.finish) facts.finish = finishFromText(r.title || "");
   if (facts.format === "auction") facts.priceUncertain = false; // ältere Zeilen: Auktionspreis ist echt
-  return { ...facts, itemId: r.item_id, title: r.title, url: r.url, price: Number(r.price_eur), soldAt: new Date(r.sold_at).toISOString(), currency: "EUR" };
+  let price = Number(r.price_eur);
+  if (facts.offerPrice != null) { facts.askingPrice = price; price = Number(facts.offerPrice); facts.priceUncertain = false; }
+  return { ...facts, itemId: r.item_id, title: r.title, url: r.url, price, soldAt: new Date(r.sold_at).toISOString(), currency: "EUR" };
 }
 
 // Suchzeile einer gespeicherten Zeile rekonstruieren (für nachträgliche Detailseiten)
@@ -531,6 +566,7 @@ export function triage(card, sale) {
   if (c.language === "mismatch" || c.edition === "mismatch" || c.finish === "mismatch") return "drop";
   if (c.condition === "mismatch" && sale.stageSource === "title") return "drop";
   if (sale.hasDetail) return "ok";
+  if (sale.priceUncertain) return "detail"; // Preisvorschlag: nur die Detailseite nennt den gezahlten Betrag
   const open = c.language !== "match" || c.condition !== "match" || c.finish === "unknown" || c.finish === "unproven" ||
     (card.firstEdition && c.edition !== "match") || sale.gradedReason === "search-condition";
   return open ? "detail" : "ok";
@@ -549,6 +585,20 @@ export function snapshotPayload(r) {
       last5: w(r.last5), excluded: r.excluded,
     },
   };
+}
+
+// Merkmale einer anderen gespeicherten Zeile desselben Angebots übernehmen (spart die Detailseite).
+// Den Preisvorschlag als Anteil übertragen, weil der Euro-Betrag je Abruf leicht anders umgerechnet sein kann.
+export function withSiblingFacts(sale, sib) {
+  const { raw, offerPrice, askingPrice, ...facts } = sib || {};
+  const out = { ...sale, ...facts };
+  if (offerPrice != null && askingPrice > 0) {
+    out.offerPrice = Math.round(sale.price * (offerPrice / askingPrice) * 100) / 100;
+    out.askingPrice = sale.price;
+    out.price = out.offerPrice;
+    out.priceUncertain = false;
+  } else { out.offerPrice = null; out.askingPrice = null; }
+  return out;
 }
 
 // Ein Verkauf = Artikelnummer + Verkaufstag. Der Preis gehört nicht dazu, weil eBay Fremdwährungsangebote
