@@ -698,14 +698,21 @@ function windowStats(sales, now, days) {
 function matchCard(card, sales, opts = {}) {
   const now = opts.now ? new Date(opts.now).getTime() : Date.now();
   const ex = { graded: 0, multi: 0, variant: 0, conflict: 0, irrelevant: 0, old: 0, other_currency: 0, duplicate: 0, no_date: 0 };
-  const seen = new Set();
   const cands = [], conflictList = [], rejected = [];
   const reject = (s, reason) => rejected.push({ sale: s, reason });
 
+  // Derselbe Verkauf kann mehrfach gespeichert sein: eBay rechnet Angebote in Fremdwährung bei jedem Abruf
+  // leicht anders in Euro um. Ein Verkauf ist daher Artikelnummer + Verkaufstag, der Preis zählt nicht.
+  // Von mehreren Fassungen gilt die mit gelesener Detailseite, sonst die zuerst gespeicherte.
+  const best = new Map();
   for (const s of sales) {
-    const key = `${s.itemId}|${(s.soldAt || "").slice(0, 10)}|${s.price}`;
-    if (seen.has(key)) { ex.duplicate++; continue; }
-    seen.add(key);
+    const key = saleKey(s);
+    const prev = best.get(key);
+    if (!prev) best.set(key, s);
+    else { ex.duplicate++; if (s.hasDetail && !prev.hasDetail) best.set(key, s); }
+  }
+  for (const s of sales) {
+    if (best.get(saleKey(s)) !== s) continue;
     if (!s.soldAt) { ex.no_date++; reject(s, "no_date"); continue; }
     if (now - new Date(s.soldAt).getTime() > 365 * DAY) { ex.old++; reject(s, "old"); continue; }
     if (s.currency !== "EUR") { ex.other_currency++; reject(s, "other_currency"); continue; }
@@ -925,7 +932,9 @@ function snapshotPayload(r) {
   };
 }
 
-const saleKey = (s) => `${s.itemId}|${String(s.soldAt || "").slice(0, 10)}|${s.price}`;
+// Ein Verkauf = Artikelnummer + Verkaufstag. Der Preis gehört nicht dazu, weil eBay Fremdwährungsangebote
+// bei jedem Abruf etwas anders umrechnet (sonst würde derselbe Verkauf mehrfach gespeichert).
+const saleKey = (s) => `${s.itemId}|${String(s.soldAt || "").slice(0, 10)}`;
 
 return { parseSale, matchCard, buildQuery, autoQuery, autoQueries, cardFromRow, saleFromDb, snapshotPayload, stagesIn, saleKey, STAGES, setIdOf, queryKey };
 })();
