@@ -8,7 +8,7 @@
 //   5. Verkäufe speichern, dann für ALLE Karten den Wert neu berechnen (auch ohne neue Abfrage)
 
 import {
-  parseSale, matchCard, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey, queryKey, setIdOf, numberVariants, autoQueries,
+  parseSale, matchCard, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey, queryKey, setIdOf, numberVariants, autoQueries, withSiblingFacts,
 } from "./ebay-logic.mjs";
 
 const env = process.env;
@@ -401,8 +401,7 @@ async function main() {
     let sale;
     const sib = siblings.get(w.sale.itemId);
     if (w.need === "detail" && sib) {
-      const { raw, ...facts } = sib;
-      sale = { ...w.sale, ...facts };
+      sale = withSiblingFacts(w.sale, sib);
     } else if (w.need === "detail" && details.has(w.sale.itemId)) {
       sale = parseSale(w.row, details.get(w.sale.itemId));
     } else {
@@ -431,10 +430,12 @@ async function main() {
   }
 
   /* 5b. Detailseiten nachholen (nur wenn EBAY_IMAGE_BUDGET_USD > 0) für gespeicherte Verkäufe, bei denen sie etwas klären:
-     1. Verkäufe ohne Detailseite, die nur an einem unbekannten Merkmal scheitern (meist der Zustand) –
+     1. Verkäufe mit angenommenem Preisvorschlag, die in den Wert eingehen (nur die Detailseite nennt den gezahlten Betrag);
+     2. Verkäufe ohne Detailseite, die nur an einem unbekannten Merkmal scheitern (meist der Zustand) –
         sie können danach in den Wert eingehen;
-     2. Verkäufe ohne Bild, die in den Wert oder die Zustandstabelle eingehen;
-     3. übrige Verkäufe ohne Bild unter "Nicht berücksichtigt".
+     3. Preisvorschläge in der Zustandstabelle;
+     4. Verkäufe ohne Bild, die in den Wert oder die Zustandstabelle eingehen;
+     5. übrige Verkäufe ohne Bild unter "Nicht berücksichtigt".
      Je Stufe die wertvollsten Karten zuerst. Verkäufe anderer Karten, bewertete Karten und Sammelangebote werden
      übersprungen. Nicht mehr abrufbare Angebote werden nach zwei Versuchen aufgegeben. */
   const estSoFar = () => stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow +
@@ -443,31 +444,39 @@ async function main() {
   if (CFG.imageBudget > 0 && CFG.apifyToken && imgBudget > COST.detailRun + COST.detailPage) {
     const since = new Date(now - CFG.imageMaxDays * DAY).toISOString();
     const recent = await sbAll(`ebay_sales?select=card_id,item_id,sold_at,price_eur,title,url,parsed&excluded=eq.false&parsed->>imageTried=is.null&sold_at=gte.${since}&order=sold_at.desc`);
-    const open = recent.filter((r) => { const p = r.parsed || {}; return !p.image || !p.hasDetail; });
+    // Preisvorschlag ohne bekannten Betrag (auch bei Zeilen, deren Detailseite vor dieser Auswertung gelesen wurde)
+    const needOffer = (r) => { const p = r.parsed || {}; return Boolean(p.priceUncertain) && !p.offerChecked && p.format !== "auction"; };
+    const open = recent.filter((r) => { const p = r.parsed || {}; return !p.image || !p.hasDetail || needOffer(r); });
     const rowsByCard = new Map();
     for (const r of open) { if (!rowsByCard.has(r.card_id)) rowsByCard.set(r.card_id, []); rowsByCard.get(r.card_id).push(r); }
     const UNKNOWN = new Set(["unknown_condition", "unknown_language", "unknown_edition", "unknown_finish", "reverse_unproven", "conflict"]);
     const COUNTING = new Set(["condition"]);
     const OTHER = new Set(["language", "edition", "finish"]);
-    const facts = [], imgUsed = [], imgOther = [];
+    const offersUsed = [], facts = [], offersCond = [], imgUsed = [], imgOther = [];
     for (const c of ranked) {
       const rs = rowsByCard.get(c.id);
       if (!rs) continue;
       const sales = rs.map((r) => { const x = saleFromDb(r); x._row = r; return x; });
       const res = matchCard(cardFromRow(c), sales, { now });
       const noImage = (r) => !(r.parsed && r.parsed.image);
-      for (const x of [...res.used, ...(res.offersOut || [])]) if (noImage(x._row)) imgUsed.push(x._row);
+      for (const x of res.used) {
+        if (needOffer(x._row)) offersUsed.push(x._row);
+        else if (noImage(x._row)) imgUsed.push(x._row);
+      }
       for (const { sale, reason } of res.rejected) {
         const r = sale._row;
         if (UNKNOWN.has(reason) && !(r.parsed && r.parsed.hasDetail)) facts.push(r);
+        else if (COUNTING.has(reason) && needOffer(r)) offersCond.push(r);
         else if (COUNTING.has(reason) && noImage(r)) imgUsed.push(r);
         else if ((OTHER.has(reason) || UNKNOWN.has(reason)) && noImage(r)) imgOther.push(r);
       }
     }
-    const ordered = [...facts, ...imgUsed, ...imgOther];
+    // Reihenfolge: Preisvorschläge in Werten, offene Merkmale, Preisvorschläge in der Zustandstabelle, Bilder
+    const ordered = [...offersUsed, ...facts, ...offersCond, ...imgUsed, ...imgOther];
     const wanted = [...new Set(ordered.map((r) => r.item_id))];
     const pages = Math.max(0, Math.min(CFG.imageMaxPages, Math.floor((imgBudget - COST.detailRun) / COST.detailPage), wanted.length));
-    log(`Detailseiten nachholen: ${new Set(facts.map((r) => r.item_id)).size} Angebote mit offenem Merkmal (meist Zustand), ` +
+    log(`Detailseiten nachholen: ${new Set([...offersUsed, ...offersCond].map((r) => r.item_id)).size} Preisvorschläge ohne Betrag, ` +
+      `${new Set(facts.map((r) => r.item_id)).size} Angebote mit offenem Merkmal (meist Zustand), ` +
       `${new Set([...imgUsed, ...imgOther].map((r) => r.item_id)).size} ohne Bild; dieser Lauf holt ${pages}.`);
     if (pages) {
       const ids = wanted.slice(0, pages);
@@ -494,7 +503,7 @@ async function main() {
         // Nicht gelieferte Angebote erst nach dem zweiten erfolglosen Versuch aufgeben (kurze Störungen)
         const giveUp = (p) => { const n = (p.imageTries || 0) + 1; return n >= 2 ? { ...p, imageTries: n, imageTried: true } : { ...p, imageTries: n }; };
         const fix = new Map();
-        let withImg = 0, newStage = 0;
+        let withImg = 0, newStage = 0, newOffer = 0;
         for (const r of ordered) {
           if (!idSet.has(r.item_id)) continue;
           const k = `${r.card_id}|${r.item_id}|${r.sold_at}|${r.price_eur}`;
@@ -503,9 +512,12 @@ async function main() {
           const p = r.parsed || {};
           let row;
           if (d && p.hasDetail) {
-            // Merkmale stammen schon von einer Detailseite: nur das Bild ergänzen
-            const img = parseSale(rowFromDb(r), d).image;
-            row = { ...r, parsed: img ? { ...p, image: img } : giveUp(p) };
+            // Merkmale stammen schon von einer Detailseite: nur Bild und Preisvorschlag ergänzen
+            const fresh = parseSale(rowFromDb(r), d);
+            const img = p.image || fresh.image;
+            const np = img ? { ...p, image: img } : giveUp(p);
+            if (needOffer(r)) Object.assign(np, { offerChecked: fresh.offerChecked, offerPrice: fresh.offerPrice, askingPrice: fresh.askingPrice, priceUncertain: fresh.priceUncertain });
+            row = { ...r, parsed: np };
           } else if (d) {
             // erste Detailseite für diesen Verkauf: Merkmale und Bild neu lesen
             const sale = parseSale(rowFromDb(r), d);
@@ -516,11 +528,12 @@ async function main() {
           }
           if (row.parsed.image) withImg++;
           if (row.parsed.stage && !p.stage) newStage++;
+          if (row.parsed.offerPrice != null && p.offerPrice == null) newOffer++;
           fix.set(k, row);
         }
         if (fix.size) await upsert("ebay_sales", [...fix.values()], "card_id,item_id,sold_at,price_eur");
         const gaveUp = [...fix.values()].filter((r) => r.parsed.imageTried).length;
-        log(`Detailseiten nachholen: ${fix.size} Verkäufe bearbeitet, ${newStage} mit neu erkanntem Zustand, ${withImg} mit Bild, ${gaveUp} aufgegeben.`);
+        log(`Detailseiten nachholen: ${fix.size} Verkäufe bearbeitet, ${newStage} mit neu erkanntem Zustand, ${newOffer} mit gezahltem Preisvorschlag, ${withImg} mit Bild, ${gaveUp} aufgegeben.`);
       }
     }
   }
