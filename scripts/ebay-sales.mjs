@@ -318,7 +318,9 @@ async function main() {
     const ids = processed.map((c) => c.id).join(",");
     for (const r of await sbAll(`ebay_sales?select=card_id,item_id,sold_at,price_eur,title,url,parsed&card_id=in.(${ids})&order=id`)) {
       if (!existing.has(r.card_id)) existing.set(r.card_id, new Map());
-      existing.get(r.card_id).set(saleKey(saleFromDb(r)), r);
+      // derselbe Verkauf kann (aus alten Läufen) mehrfach gespeichert sein: die Fassung mit Detailseite gilt
+      const m = existing.get(r.card_id), k = saleKey(saleFromDb(r)), prev = m.get(k);
+      if (!prev || ((r.parsed && r.parsed.hasDetail) && !(prev.parsed && prev.parsed.hasDetail))) m.set(k, r);
     }
   }
 
