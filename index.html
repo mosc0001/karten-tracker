@@ -319,18 +319,18 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .dactions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap}
 .dangerlink{background:none;border:0;padding:8px 0;color:var(--danger);font-weight:500}
 .sales{list-style:none;margin:8px 0 0;padding:0}
-.sale{display:grid;grid-template-columns:5.2rem 1fr auto;gap:3px 10px;padding:11px 0;border-top:.5px solid var(--line);align-items:center}
-.sale .sd{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
-.sale .st{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
-.sale .sp{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.sale{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"sd sp" "st st" "stl sx";gap:4px 12px;padding:11px 0;border-top:.5px solid var(--line);align-items:center}
+.sale.hasimg{grid-template-columns:2.8rem minmax(0,1fr) auto;grid-template-areas:"img sd sp" "img st st" "img stl sx"}
+.sale .sd{grid-area:sd;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.sale .st{grid-area:st;display:flex;flex-wrap:nowrap;gap:4px;min-width:0;overflow:hidden}
+.sale .st .tag{white-space:nowrap;flex:none}
+.sale .sp{grid-area:sp;font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .sale .sp small{display:block;font-weight:400;color:var(--muted);font-size:11px}
-.sale .stl{grid-column:1/3;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;min-width:0}
+.sale .stl{grid-area:stl;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;min-width:0}
 .sale .stl:hover{color:var(--accent)}
-.sale .sx{padding:4px 12px;font-size:13px;justify-self:end}
-.sale.hasimg{grid-template-columns:2.8rem 5.2rem 1fr auto}
-.sale .simg{grid-row:1 / span 2;width:2.8rem;height:3.8rem;border-radius:5px;overflow:hidden;background:var(--fill);display:block}
+.sale .sx{grid-area:sx;padding:4px 12px;font-size:13px;justify-self:end}
+.sale .simg{grid-area:img;align-self:start;width:2.8rem;height:3.8rem;border-radius:5px;overflow:hidden;background:var(--fill);display:block}
 .sale .simg img{width:100%;height:100%;object-fit:cover;display:block}
-.sale.hasimg .stl{grid-column:2 / 4}
 .sale.off .sp{color:var(--muted)}
 details.more{margin-top:14px;font-size:14px;color:var(--muted)}
 details.more summary{cursor:pointer;padding:6px 0}
