@@ -542,6 +542,13 @@ export function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
   if (!facts.finish) facts.finish = finishFromText(r.title || "");
   if (facts.format === "auction") facts.priceUncertain = false; // ältere Zeilen: Auktionspreis ist echt
+  // Von dir in der App gesetzter Zustand (Spalte stage_override) hat Vorrang vor der automatischen Erkennung
+  if (STAGES.includes(r.stage_override)) {
+    facts.stageAuto = facts.stage ?? null;
+    facts.stage = r.stage_override;
+    facts.stageSource = "manual";
+    facts.conflicts = (facts.conflicts || []).filter((x) => x !== "condition");
+  }
   let price = Number(r.price_eur);
   if (facts.offerPrice != null) { facts.askingPrice = price; price = Number(facts.offerPrice); facts.priceUncertain = false; }
   return { ...facts, itemId: r.item_id, title: r.title, url: r.url, price, soldAt: new Date(r.sold_at).toISOString(), currency: "EUR" };
