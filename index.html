@@ -170,6 +170,8 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
 .thumb{width:52px;height:72px;object-fit:contain;border-radius:5px;background:var(--fill);display:block;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .name{font-weight:600;font-size:16px}
 .meta{display:flex;flex-wrap:wrap;gap:5px;align-items:center;color:var(--muted);font-size:13px;margin-top:3px}
+.rset{display:block;color:var(--muted);font-size:13px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rset + .meta{margin-top:6px}
 .tag{background:var(--fill);border-radius:5px;padding:1px 6px;font-size:12px;font-weight:500;color:var(--muted)}
 .tag.foil{background:linear-gradient(115deg,#7ad0ff55,#b69cff55,#ff9fcb55,#ffd97955);color:var(--ink)}
 .tag.first{background:var(--tint);color:var(--accent)}
@@ -1492,8 +1494,8 @@ function rowHtml(r) {
     ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" data-tid="${esc(c.tcgdex_id || "")}" onerror="imgFallback(this)">` : `<span class="thumb"></span>`}
     <span>
       <span class="name">${esc(c.name)}</span>
-      <span class="meta"><span>${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
-        <span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}</span>
+      <span class="rset">${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
+      <span class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}</span>
     </span>
     <span class="price">${priceCell(r)}</span>
   </button></li>`;
