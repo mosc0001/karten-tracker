@@ -231,6 +231,13 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .fcheck{grid-column:1/-1}
 
 /* Blätter: am Handy von unten, am Rechner als Fenster */
+.lightbox{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:calc(28px + env(safe-area-inset-top)) 28px calc(28px + env(safe-area-inset-bottom));background:rgba(0,0,0,.38);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);cursor:zoom-out;animation:lbfade .2s ease-out}
+.lightbox img{display:block;max-width:min(86vw,620px);max-height:80vh;width:auto;height:auto;object-fit:contain;border-radius:14px;background:var(--fill);box-shadow:0 24px 70px rgba(0,0,0,.55);animation:lbzoom .22s cubic-bezier(.2,.8,.2,1)}
+.lightbox .lbclose{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:34px;height:34px;border-radius:50%;border:0;padding:0;font-size:18px;line-height:34px;color:#fff;background:rgba(60,60,67,.6);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);cursor:pointer}
+@keyframes lbfade{from{opacity:0}to{opacity:1}}
+@keyframes lbzoom{from{transform:scale(.92);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.lightbox,.lightbox img{animation:none}}
+.dart img{cursor:zoom-in}
 .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .sheet{position:relative;background:var(--surface);width:100%;max-width:820px;max-height:93vh;overflow:auto;border-radius:16px 16px 0 0;padding:22px 20px calc(26px + env(safe-area-inset-bottom));box-shadow:var(--shadow)}
 .sheet::before{content:"";position:absolute;top:7px;left:50%;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--faint)}
@@ -1922,6 +1929,42 @@ function closeSheet() {
   document.body.classList.remove("lock");
 }
 
+/* Bild groß innerhalb der App (Leuchtkasten). Ein Tipp daneben, aufs Bild, auf ✕ oder Escape schließt ihn,
+   die App bleibt im Hintergrund sichtbar. Erst das schon geladene kleine Bild zeigen, dann das große nachladen. */
+function openLightbox(big, small, alt) {
+  closeLightbox();
+  const el = document.createElement("div");
+  el.className = "lightbox";
+  el.id = "lightbox";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-modal", "true");
+  el.setAttribute("aria-label", alt || "Bild");
+  el.innerHTML = `<img alt="${esc(alt || "")}"><button class="lbclose" aria-label="Schließen">✕</button>`;
+  const img = el.querySelector("img");
+  img.src = small || big;
+  if (big && big !== small) { const pre = new Image(); pre.onload = () => { if (img.isConnected) img.src = big; }; pre.src = big; }
+  el.addEventListener("click", e => { e.stopPropagation(); closeLightbox(); });
+  document.body.appendChild(el);
+  document.body.classList.add("lock");
+  el.querySelector(".lbclose").focus({ preventScroll: true });
+}
+function closeLightbox() {
+  const el = $("#lightbox");
+  if (!el) return false;
+  el.remove();
+  if (!$("#sheet")) document.body.classList.remove("lock");
+  return true;
+}
+// Angebotsfotos und das Kartenbild in der Detailansicht öffnen den Leuchtkasten statt einer neuen Seite.
+// Mit gedrückter Cmd-/Strg-Taste öffnet ein Angebotsfoto weiterhin in einem neuen Tab.
+document.addEventListener("click", e => {
+  if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest("a.simg");
+  if (a) { e.preventDefault(); const im = a.querySelector("img"); openLightbox(a.href, im && im.currentSrc, "Angebotsfoto"); return; }
+  const art = e.target.closest(".dart img");
+  if (art) { e.preventDefault(); openLightbox(art.currentSrc || art.src, null, art.alt); }
+});
+
 /* ---------- Karte hinzufügen ---------- */
 
 const setsCache = {};
@@ -2643,6 +2686,7 @@ async function openDetail(id) {
 document.addEventListener("click", e => { if (!e.target.closest(".menuwrap")) closeMenu(false); });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
+  if (closeLightbox()) return;
   if (closeMenu(true)) return;
   if ($("#sheet")) closeSheet();
 });
