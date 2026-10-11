@@ -331,6 +331,13 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .sale .sd{grid-area:sd;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
 .sale .st{grid-area:st;display:flex;flex-wrap:nowrap;gap:4px;min-width:0;overflow:hidden}
 .sale .st .tag{white-space:nowrap;flex:none}
+.stpick{position:relative;color:var(--ink);padding-right:17px;cursor:pointer;
+  background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%238e8e93'/%3E%3C/svg%3E") no-repeat right 5px center}
+.stpick.manual{box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
+/* Unsichtbare Auswahl über dem Label: öffnet die native Auswahl; 16px Schrift verhindert das Hineinzoomen auf dem iPhone */
+.stpick select{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;opacity:0;font-size:16px;cursor:pointer;border-radius:5px}
+.stpick:focus-within{box-shadow:0 0 0 2px var(--accent)}
+.stpick.busy{opacity:.5}
 .sale .sp{grid-area:sp;font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .sale .sp small{display:block;font-weight:400;color:var(--muted);font-size:11px}
 .sale .stl{grid-area:stl;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;min-width:0}
@@ -932,6 +939,13 @@ function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
   if (!facts.finish) facts.finish = finishFromText(r.title || "");
   if (facts.format === "auction") facts.priceUncertain = false; // ältere Zeilen: Auktionspreis ist echt
+  // Von dir in der App gesetzter Zustand (Spalte stage_override) hat Vorrang vor der automatischen Erkennung
+  if (STAGES.includes(r.stage_override)) {
+    facts.stageAuto = facts.stage ?? null;
+    facts.stage = r.stage_override;
+    facts.stageSource = "manual";
+    facts.conflicts = (facts.conflicts || []).filter((x) => x !== "condition");
+  }
   let price = Number(r.price_eur);
   if (facts.offerPrice != null) { facts.askingPrice = price; price = Number(facts.offerPrice); facts.priceUncertain = false; }
   return { ...facts, itemId: r.item_id, title: r.title, url: r.url, price, soldAt: new Date(r.sold_at).toISOString(), currency: "EUR" };
@@ -2357,12 +2371,23 @@ function saleImgHtml(src) {
   return `<a class="simg" href="${esc(big)}" target="_blank" rel="noopener" title="Angebotsfoto groß öffnen"><img src="${esc(small)}" alt="Angebotsfoto" loading="lazy" onerror="this.parentNode.style.visibility='hidden'"></a>`;
 }
 
-function saleTags(s) {
+function saleTags(s, editable) {
   const t = [s.language || "Sprache offen", s.stage || "Zustand offen"];
   const f = s.finishEff || s.finish;
   if (f) t.push(FIN_LABEL[f] + (s.finishEff && s.finishEff !== s.finish ? " (laut Nummer)" : ""));
   if (s.edition === "1st") t.push("1st Ed.");
-  return t.map(x => `<span class="tag">${esc(x)}</span>`).join("");
+  const html = t.map(x => `<span class="tag">${esc(x)}</span>`);
+  if (editable && s._id != null) html[1] = stageSelectHtml(s);
+  return html.join("");
+}
+// Zustand eines Verkaufs von Hand ändern: Das Zustandslabel ist eine Auswahl. "Automatisch" nimmt die Änderung zurück.
+function stageSelectHtml(s) {
+  const manual = s.stageSource === "manual";
+  const opts = [];
+  if (manual) opts.push(`<option value="">↺ Auto (${esc(s.stageAuto || "offen")})</option>`);
+  else if (!s.stage) opts.push(`<option value="" selected>Zustand offen</option>`);
+  for (const st of EBAY.STAGES) opts.push(`<option value="${st}"${s.stage === st ? " selected" : ""}>${st}</option>`);
+  return `<span class="tag stpick${manual ? " manual" : ""}" title="${manual ? "Von dir gesetzt. Antippen zum Ändern." : "Antippen, um den Zustand zu ändern"}">${esc(s.stage || "Zustand offen")}<select class="stsel" data-sid="${s._id}" aria-label="Zustand dieses Verkaufs ändern">${opts.join("")}</select></span>`;
 }
 
 function valueBlockHtml(c, e) {
@@ -2448,6 +2473,7 @@ async function openDetail(id) {
     </section>`);
 
   let rows = null; // Verkäufe aus der Datenbank, null = nicht verfügbar
+  let canSetStage = true; // false, solange die Spalte stage_override fehlt
 
   const compute = card => {
     const live = rows.filter(r => !r.excluded).map(r => ({ ...EBAY.saleFromDb(r), _id: r.id }));
@@ -2466,7 +2492,7 @@ async function openDetail(id) {
   const saleLi = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
       ${saleImgHtml(s.image)}
       <span class="sd">${shortDate(s.soldAt)}</span>
-      <span class="st">${saleTags(s)}</span>
+      <span class="st">${saleTags(s, canSetStage)}</span>
       <span class="sp">${salePriceHtml(s)}</span>
       <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
       <button class="ghost sx" data-x="${s._id}">Ausschließen</button>
@@ -2475,7 +2501,7 @@ async function openDetail(id) {
   const saleLiPlain = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
       ${saleImgHtml(s.image)}
       <span class="sd">${shortDate(s.soldAt)}</span>
-      <span class="st">${saleTags(s)}</span>
+      <span class="st">${saleTags(s, canSetStage)}</span>
       <span class="sp">${salePriceHtml(s)}</span>
       <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
     </li>`;
@@ -2570,7 +2596,7 @@ async function openDetail(id) {
         <thead><tr><th scope="col">Zustand</th><th scope="col" class="num">Median</th><th scope="col" class="num">Grundlage</th></tr></thead>
         <tbody>${lines}</tbody>
       </table>
-      <p class="muted dsmall">Tippe auf einen Zustand, um die einzelnen Verkäufe mit Link zu eBay zu sehen. Gleiche Sprache, Edition und Ausführung wie deine Karte, nur der Zustand wechselt. Grau: weniger als 3 Verkäufe.</p>
+      <p class="muted dsmall">Tippe auf einen Zustand, um die einzelnen Verkäufe mit Link zu eBay zu sehen. Gleiche Sprache, Edition und Ausführung wie deine Karte, nur der Zustand wechselt. Grau: weniger als 3 Verkäufe.${canSetStage ? " Stimmt der Zustand eines Verkaufs nicht, tippe auf sein Zustandslabel und wähle den richtigen; der Verkauf wandert dann in diese Zeile." : ""}</p>
       ${unknown ? `<p class="muted dsmall">${unknown} passende ${unknown === 1 ? "Verkauf lässt" : "Verkäufe lassen"} sich keinem Zustand zuordnen und ${unknown === 1 ? "fehlt" : "fehlen"} in der Tabelle.</p>` : ""}
       ${cover ? `<p class="muted dsmall">${esc(cover)}</p>` : ""}`;
   };
@@ -2598,6 +2624,28 @@ async function openDetail(id) {
     toggleSale(Number(b.dataset.x ?? b.dataset.in), b.dataset.x !== undefined);
     return true;
   };
+  const setStage = async (rowId, stage) => {
+    const msg = $("#smsg", sheet);
+    if (msg) msg.textContent = "";
+    const { error } = await db.from("ebay_sales").update({ stage_override: stage }).eq("id", rowId);
+    if (error) {
+      if (msg) msg.textContent = "Zustand ändern fehlgeschlagen: " + (/permission|denied|stage_override/i.test(error.message) ? "Bitte update-zustand.sql in Supabase ausführen." : error.message);
+      renderSales(); return;
+    }
+    rows.find(r => r.id === rowId).stage_override = stage;
+    if (stage) openStages.add(stage); // Ziel-Zustand aufklappen, damit der Verkauf sichtbar bleibt
+    renderSales();
+    await saveValue(c);
+  };
+  const onStageChange = ev => {
+    const sel = ev.target.closest("select.stsel");
+    if (!sel) return;
+    sel.disabled = true;
+    sel.parentNode.classList.add("busy");
+    setStage(Number(sel.dataset.sid), sel.value || null);
+  };
+  $("#bycond", sheet).addEventListener("change", onStageChange);
+  $("#sales", sheet).addEventListener("change", onStageChange);
   // Nicht direkt onSaleButton zuweisen: dessen Rückgabe "false" würde jeden anderen Klick (Dropdown, Links) blockieren
   $("#sales", sheet).onclick = ev => { onSaleButton(ev); };
   $("#bycond", sheet).onclick = ev => {
@@ -2612,9 +2660,14 @@ async function openDetail(id) {
     if (btn && ev.detail === 0) btn.focus({ preventScroll: true });
   };
 
-  const loaded = await db.from("ebay_sales")
-    .select("id,item_id,sold_at,price_eur,title,url,parsed,excluded")
+  const loadSales = cols => db.from("ebay_sales").select(cols)
     .eq("card_id", id).order("sold_at", { ascending: false }).limit(1000);
+  let loaded = await loadSales("id,item_id,sold_at,price_eur,title,url,parsed,excluded,stage_override");
+  if (loaded.error && /stage_override/.test(loaded.error.message)) {
+    // update-zustand.sql noch nicht ausgeführt: ohne Zustandsänderung weiter
+    canSetStage = false;
+    loaded = await loadSales("id,item_id,sold_at,price_eur,title,url,parsed,excluded");
+  }
   if (loaded.error) {
     const box = $("#sales", sheet);
     if (box) box.innerHTML = `<p class="muted dsmall">${/ebay_sales|relation|does not exist|schema cache/i.test(loaded.error.message) ? esc(UPDATE5_MSG) : "Die Verkäufe konnten nicht geladen werden: " + esc(loaded.error.message)}</p>`;
