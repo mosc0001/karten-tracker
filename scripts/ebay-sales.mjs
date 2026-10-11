@@ -150,6 +150,10 @@ async function main() {
   const today = now.toISOString().slice(0, 10);
   const stats = { cards: 0, searchRows: 0, urls: 0, searchRuns: 0, detailPages: 0, detailRuns: 0, apifyUsd: 0, apifyUsdKnown: false, failed: 0, ok: 0 };
 
+  // Von Hand gesetzte Zustände (Spalte stage_override, ab update-zustand.sql) mitlesen; ohne die Spalte läuft der Job wie bisher
+  const saleCols = await sb("ebay_sales?select=stage_override&limit=1").then(() => "card_id,item_id,sold_at,price_eur,title,url,parsed,stage_override",
+    () => { log("Hinweis: Spalte stage_override fehlt (update-zustand.sql ausführen), von Hand gesetzte Zustände werden nicht berücksichtigt."); return "card_id,item_id,sold_at,price_eur,title,url,parsed"; });
+
   /* 1. Karten und Hilfswerte */
   const cards = await sbAll("cards?select=id,name,set_name,card_number,language,condition,finish,foil,first_edition,quantity,tcgdex_id,ebay_query,set_total,tcg_meta,ebay_checked_at&order=created_at");
   log(`${cards.length} Karten.`);
@@ -443,7 +447,7 @@ async function main() {
   const imgBudget = Math.min(CFG.imageBudget, available - estSoFar() - 0.02);
   if (CFG.imageBudget > 0 && CFG.apifyToken && imgBudget > COST.detailRun + COST.detailPage) {
     const since = new Date(now - CFG.imageMaxDays * DAY).toISOString();
-    const recent = await sbAll(`ebay_sales?select=card_id,item_id,sold_at,price_eur,title,url,parsed&excluded=eq.false&parsed->>imageTried=is.null&sold_at=gte.${since}&order=sold_at.desc`);
+    const recent = await sbAll(`ebay_sales?select=${saleCols}&excluded=eq.false&parsed->>imageTried=is.null&sold_at=gte.${since}&order=sold_at.desc`);
     // Preisvorschlag ohne bekannten Betrag (auch bei Zeilen, deren Detailseite vor dieser Auswertung gelesen wurde)
     const needOffer = (r) => { const p = r.parsed || {}; return Boolean(p.priceUncertain) && !p.offerChecked && p.format !== "auction"; };
     const open = recent.filter((r) => { const p = r.parsed || {}; return !p.image || !p.hasDetail || needOffer(r); });
@@ -510,6 +514,9 @@ async function main() {
           if (fix.has(k)) continue;
           const d = got.get(String(r.item_id));
           const p = r.parsed || {};
+          // Gespeichert werden nur die Spalten, die der Job selbst pflegt (alle Zeilen eines Aufrufs brauchen dieselben
+          // Spalten; ein von Hand gesetzter Zustand in stage_override bleibt dadurch unberührt)
+          const { stage_override, ...base } = r;
           let row;
           if (d && p.hasDetail) {
             // Merkmale stammen schon von einer Detailseite: nur Bild und Preisvorschlag ergänzen
@@ -517,14 +524,14 @@ async function main() {
             const img = p.image || fresh.image;
             const np = img ? { ...p, image: img } : giveUp(p);
             if (needOffer(r)) Object.assign(np, { offerChecked: fresh.offerChecked, offerPrice: fresh.offerPrice, askingPrice: fresh.askingPrice, priceUncertain: fresh.priceUncertain });
-            row = { ...r, parsed: np };
+            row = { ...base, parsed: np };
           } else if (d) {
             // erste Detailseite für diesen Verkauf: Merkmale und Bild neu lesen
             const sale = parseSale(rowFromDb(r), d);
             row = toDbRow(r.card_id, sale, rowFromDb(r));
             if (!row.parsed.image) row.parsed = giveUp({ ...row.parsed, imageTries: p.imageTries });
           } else {
-            row = { ...r, parsed: giveUp(p) }; // Angebot nicht geliefert: beim zweiten Mal aufgeben
+            row = { ...base, parsed: giveUp(p) }; // Angebot nicht geliefert: beim zweiten Mal aufgeben
           }
           if (row.parsed.image) withImg++;
           if (row.parsed.stage && !p.stage) newStage++;
@@ -539,7 +546,7 @@ async function main() {
   }
 
   /* 6. Für ALLE Karten neu rechnen (auch das Herausrutschen alter Verkäufe aus dem Zeitfenster) */
-  const allSales = await sbAll("ebay_sales?select=card_id,item_id,sold_at,price_eur,title,url,parsed&excluded=eq.false&order=id");
+  const allSales = await sbAll(`ebay_sales?select=${saleCols}&excluded=eq.false&order=id`);
   const byCard = new Map();
   for (const r of allSales) { if (!byCard.has(r.card_id)) byCard.set(r.card_id, []); byCard.get(r.card_id).push(saleFromDb(r)); }
   const snaps = [];
