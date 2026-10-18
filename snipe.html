@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Snipe">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Snipe-Scout</title>
+<style>
+/* Gestaltung 1:1 aus index.html (Karten-Tracker) */
+/* ---------- Apple-Designsprache: Systemschrift, Systemfarben, Glas, Regale ---------- */
+:root{
+  color-scheme:light dark;
+  --bg:#F2F2F7;--surface:#FFFFFF;--surface2:#F2F2F7;--fill:rgba(118,118,128,.12);--fill2:rgba(118,118,128,.2);
+  --ink:#000000;--muted:rgba(60,60,67,.6);--faint:rgba(60,60,67,.3);--line:rgba(60,60,67,.18);
+  --accent:#007AFF;--accent-ink:#FFFFFF;--tint:rgba(0,122,255,.12);--danger:#FF3B30;--up:#34C759;--down:#FF3B30;
+  --glass:rgba(249,249,249,.78);--shadow:0 10px 30px rgba(0,0,0,.12);--poster-shadow:0 8px 20px rgba(0,0,0,.18);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","Segoe UI",Roboto,system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#000000;--surface:#1C1C1E;--surface2:#2C2C2E;--fill:rgba(118,118,128,.24);--fill2:rgba(118,118,128,.36);
+  --ink:#FFFFFF;--muted:rgba(235,235,245,.6);--faint:rgba(235,235,245,.3);--line:rgba(84,84,88,.55);
+  --accent:#0A84FF;--accent-ink:#FFFFFF;--tint:rgba(10,132,255,.2);--danger:#FF453A;--up:#30D158;--down:#FF453A;
+  --glass:rgba(22,22,24,.72);--shadow:0 20px 50px rgba(0,0,0,.6);--poster-shadow:0 10px 26px rgba(0,0,0,.55);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%;overflow-x:clip}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 var(--font);letter-spacing:-.005em;-webkit-font-smoothing:antialiased;
+  padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+body.lock{overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:disabled{opacity:.45;cursor:default}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 70%,transparent);outline-offset:2px}
+h1,h2,h3{margin:0;line-height:1.15;letter-spacing:-.02em}
+a{color:var(--accent)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px 120px}
+.wrap.wide{max-width:1180px}
+.pad{padding:24px 20px}
+.muted{color:var(--muted)}
+.err{color:var(--danger)}
+
+/* Navigationsleiste aus Glas, kleiner Titel erscheint beim Scrollen */
+.top{position:sticky;top:0;z-index:8;display:flex;justify-content:space-between;align-items:center;gap:12px;
+  --bleed:calc((100vw - 100%) / 2);margin:0 calc(-1 * var(--bleed));padding:calc(10px + env(safe-area-inset-top)) var(--bleed) 10px;background:transparent;transition:background .2s,box-shadow .2s}
+body.scrolled .top{background:var(--glass);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);box-shadow:0 .5px 0 var(--line)}
+.top .ntitle{font-size:17px;font-weight:600;opacity:0;transform:translateY(4px);transition:opacity .2s,transform .2s;white-space:nowrap}
+body.scrolled .top .ntitle{opacity:1;transform:none}
+.ltitle{font-size:34px;font-weight:700;letter-spacing:.01em;margin:2px 0 14px}
+@media (min-width:760px){.ltitle{font-size:44px;letter-spacing:-.01em;margin:6px 0 18px}}
+.actions{display:flex;gap:10px;align-items:center}
+
+/* Knöpfe */
+.primary{background:var(--accent);color:var(--accent-ink);border:0;border-radius:999px;padding:11px 20px;font-weight:600;font-size:16px}
+.primary:hover{filter:brightness(1.08)}
+.ghost{background:var(--fill);border:0;border-radius:999px;padding:8px 14px;color:var(--ink);font-weight:500}
+.ghost:hover{background:var(--fill2)}
+.danger{background:none;border:0;color:var(--danger);border-radius:999px;padding:12px}
+.wide{display:block;width:100%;margin-top:14px}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;background:var(--fill);border:0;border-radius:50%;color:var(--accent)}
+.iconbtn:hover{background:var(--fill2)}
+.iconbtn svg{width:18px;height:18px}
+.addtop{display:none}
+@media (min-width:760px){.addtop{display:inline-flex;align-items:center;padding:8px 16px;font-size:15px}.fab{display:none}}
+.fab{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:7;box-shadow:0 10px 30px rgba(0,0,0,.35);padding:14px 22px}
+.linkish{background:none;border:0;padding:0;color:var(--accent);font-size:15px;text-decoration:none}
+.linkish:hover{text-decoration:underline}
+
+/* Kopfbereich: Bild der wertvollsten Karte als Hintergrund, immer dunkel wie in der TV-App */
+.sleeve{position:relative;overflow:hidden;isolation:isolate;border-radius:22px;margin:0 0 30px;padding:22px;color:#fff;
+  background:radial-gradient(120% 140% at 0% 0%,#2a3550 0%,#101318 60%,#000 100%);box-shadow:var(--shadow);
+  display:grid;gap:18px;--muted:rgba(255,255,255,.72);--line:rgba(255,255,255,.22);--fill:rgba(255,255,255,.16);--fill2:rgba(255,255,255,.26);--ink:#fff;--accent:#fff;--up:#4ADE80;--down:#FF7A72}
+.hero-bg{position:absolute;inset:0;z-index:-1}
+.hero-bg img{width:100%;height:100%;object-fit:cover;transform:scale(1.4);filter:blur(42px) saturate(1.5) brightness(.62)}
+.hero-bg::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05) 0%,rgba(0,0,0,.55) 100%)}
+.hero-main{display:flex;gap:22px;align-items:center;min-width:0}
+.hero-art{display:none;flex:none;width:118px;aspect-ratio:63/88;border-radius:9px;overflow:hidden;box-shadow:0 18px 40px rgba(0,0,0,.55);background:rgba(255,255,255,.08)}
+.hero-art img{width:100%;height:100%;object-fit:contain}
+.hero-text{min-width:0}
+.total{margin:4px 0 0;font-size:clamp(2.6rem,12vw,4rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;font-variant-numeric:tabular-nums}
+.sub{margin:6px 0 0;color:var(--muted);font-size:14px}
+.sleeve .linkish{display:block;text-align:left;color:#fff;font-weight:600;margin-top:10px}
+.spark svg{width:100%;height:96px;display:block}
+.spark .sub{margin:0}
+@media (min-width:760px){
+  .sleeve{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:end;padding:30px 32px;min-height:300px}
+  .hero-art{display:block;width:150px}
+}
+
+/* Regale */
+.shelf{margin:0 0 30px}
+.shelf h2,.section-title{font-size:22px;font-weight:700;margin:0 0 12px}
+.shelf-row{--bleed:calc((100vw - 100%) / 2);list-style:none;margin:0 calc(-1 * var(--bleed));padding:4px var(--bleed) 14px;display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x proximity;scroll-padding:0 20px;scrollbar-width:none}
+.shelf-row::-webkit-scrollbar{display:none}
+.shelf-row li{flex:none;width:128px;scroll-snap-align:start}
+@media (min-width:760px){.shelf-row li{width:164px}.shelf-row{gap:20px;scroll-snap-type:none}}
+.poster{display:flex;flex-direction:column;gap:6px;width:100%;background:none;border:0;padding:0;text-align:left;color:inherit}
+.poster .art{box-shadow:var(--poster-shadow)}
+.pname{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pval{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pval b{color:var(--ink);font-weight:600}
+@media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference){
+  .poster .art,.tile .art{transition:transform .25s cubic-bezier(.2,.8,.2,1),box-shadow .25s}
+  .poster:hover .art,.tile:hover .art{transform:translateY(-4px) scale(1.03);box-shadow:0 18px 40px rgba(0,0,0,.45)}
+}
+
+/* Kartenbild */
+.art{width:100%;aspect-ratio:63/88;border-radius:10px;background:var(--fill);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.art img{width:100%;height:100%;object-fit:contain}
+.noart{color:var(--muted);font-size:13px;padding:10px;text-align:center}
+
+/* Suche und Filter */
+.filters{display:grid;gap:10px;margin:0 0 12px}
+.filters input,.filters select{margin-top:0}
+.sugwrap{position:relative}
+#fq{padding-left:36px;background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 11px 50%/17px}
+.sug{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:5;list-style:none;margin:0;padding:6px;background:var(--glass);-webkit-backdrop-filter:saturate(180%) blur(24px);backdrop-filter:saturate(180%) blur(24px);border-radius:14px;box-shadow:var(--shadow);max-height:320px;overflow:auto}
+.sug[hidden]{display:none}
+.sug li{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:10px;border-radius:9px;cursor:pointer}
+.sug li.active,.sug li:hover{background:var(--fill)}
+.sugtype{font-size:12px;color:var(--muted);background:var(--fill);border-radius:6px;padding:1px 7px;min-width:3.8em;text-align:center}
+.suglabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sugcount{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.fbar{display:flex;gap:8px;align-items:center;min-width:0}
+.fbtn,.fchip{flex:none;display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:0;border-radius:999px;background:var(--fill);color:var(--ink);font-size:14px;font-weight:500;white-space:nowrap}
+.fbtn{font-weight:600}
+.fbtn:hover,.fchip:hover{background:var(--fill2)}
+.fchip[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.fchip:disabled{opacity:.35}
+.fchip small{opacity:.7;margin-left:2px;font-size:12px;font-variant-numeric:tabular-nums}
+.fbadge{background:var(--accent);color:#fff;border-radius:999px;padding:0 7px;font-size:12px;font-weight:700;line-height:1.55}
+.fquick{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:2px 0;min-width:0}
+.fquick::-webkit-scrollbar{display:none}
+.factive{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.factive:empty{display:none}
+.achip{display:inline-flex;align-items:center;gap:2px;padding:4px 6px 4px 12px;border:0;border-radius:999px;background:var(--tint);color:var(--accent);font-size:13px;font-weight:500}
+.achip span{font-size:15px;line-height:1;padding:0 4px;opacity:.8}
+.frow2{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.frow2 select{width:auto;flex:0 1 auto}
+.resultinfo{display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--muted);font-size:14px;margin:0 0 10px}
+.resultinfo:empty{display:none}
+.toggle{display:flex;align-items:center;gap:8px;margin:0;color:var(--ink);font-size:15px}
+.toggle input{width:auto;margin:0}
+.fgroup{margin:18px 0 0}
+.fgroup h3{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600}
+.fopts{display:flex;flex-wrap:wrap;gap:8px}
+.fgroup select{margin:0}
+.fnote{color:var(--muted);font-size:13px;margin:8px 0 0}
+.pfoot{position:sticky;bottom:calc(-24px - env(safe-area-inset-bottom));background:var(--glass);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);margin:18px -20px 0;padding:12px 20px calc(12px + env(safe-area-inset-bottom));display:flex;gap:12px;align-items:center;justify-content:space-between;box-shadow:0 -.5px 0 var(--line)}
+.pfoot .primary{flex:1}
+
+/* Segmentierte Steuerung (wie iOS) */
+.seg,.vseg{display:inline-flex;gap:0;padding:2px;margin:8px 0;background:var(--fill);border-radius:9px}
+.seg button,.vseg button{flex:1;border:0;background:none;border-radius:7px;padding:6px 14px;font-size:14px;font-weight:500;color:var(--ink);white-space:nowrap}
+.seg .on,.vseg button[aria-pressed="true"]{background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 0 .5px rgba(0,0,0,.04);font-weight:600}
+@media (prefers-color-scheme:dark){.seg .on,.vseg button[aria-pressed="true"]{background:#636366}}
+.seg{display:flex}
+.vseg{margin:0 0 0 auto}
+.totseg{display:inline-flex;margin:0 0 6px}
+.sleeve .seg .on{background:rgba(255,255,255,.92);color:#000}
+
+/* Liste: gruppierte Liste wie in iOS */
+.list{list-style:none;margin:0;padding:0;background:var(--surface);border-radius:14px;overflow:hidden}
+.list li{position:relative}
+.list li+li::before{content:"";position:absolute;left:84px;right:0;top:0;height:.5px;background:var(--line)}
+.row{display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:16px;align-items:center;width:100%;text-align:left;background:none;border:0;padding:10px 16px}
+.row:hover{background:var(--fill)}
+.thumb{width:52px;height:72px;object-fit:contain;border-radius:5px;background:var(--fill);display:block;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.name{font-weight:600;font-size:16px}
+.meta{display:flex;flex-wrap:wrap;gap:5px;align-items:center;color:var(--muted);font-size:13px;margin-top:3px}
+.rset{display:block;color:var(--muted);font-size:13px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rset + .meta{margin-top:6px}
+.tag{background:var(--fill);border-radius:5px;padding:1px 6px;font-size:12px;font-weight:500;color:var(--muted)}
+.tag.foil{background:linear-gradient(115deg,#7ad0ff55,#b69cff55,#ff9fcb55,#ffd97955);color:var(--ink)}
+.tag.first{background:var(--tint);color:var(--accent)}
+.price{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:16px}
+.price small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+@media (max-width:599px){
+  .row{grid-template-columns:44px minmax(0,1fr) auto;gap:12px;padding:10px 14px}
+  .thumb{width:44px;height:61px}
+  .list li+li::before{left:70px}
+  .price small:last-of-type{display:none}
+  .price{font-size:15px}
+}
+.prov{color:var(--muted);font-weight:500}
+.empty{padding:40px 0;color:var(--muted);text-align:center}
+.note{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
+.status{margin:0 0 12px;color:var(--muted);font-size:14px}
+.status:empty{display:none}
+.up{color:var(--up)}
+.down{color:var(--down)}
+.chg{font-size:12px;font-weight:500;color:var(--muted);white-space:nowrap}
+.chg.up{color:var(--up)}
+.chg.down{color:var(--down)}
+
+/* Galerie */
+.grid{list-style:none;margin:0;padding:4px 0 0;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:22px 16px}
+@media (min-width:760px){.grid{grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:30px 22px}}
+.grid li{min-width:0}
+.tile{display:flex;flex-direction:column;gap:6px;width:100%;min-width:0;background:none;border:0;padding:0;text-align:left;color:inherit}
+.tile>*{min-width:0;max-width:100%}
+.tile .art{box-shadow:var(--poster-shadow);margin-bottom:4px}
+.tname{display:block;font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tset{display:block;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .meta{margin-top:0}
+.tprice{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 6px;font-variant-numeric:tabular-nums}
+.tprice small{color:var(--muted);font-size:12px}
+
+/* Menü als Glas-Popover */
+.menuwrap{position:relative}
+.menu{position:absolute;right:0;top:calc(100% + 8px);z-index:9;min-width:240px;margin:0;padding:6px;background:var(--glass);-webkit-backdrop-filter:saturate(180%) blur(28px);backdrop-filter:saturate(180%) blur(28px);border-radius:14px;box-shadow:var(--shadow)}
+.menu[hidden]{display:none}
+.menu button,.menu a{display:block;width:100%;text-align:left;background:none;border:0;border-radius:9px;padding:10px 12px;color:var(--ink);text-decoration:none;font-size:15px}
+.menu button:hover,.menu button:focus-visible,.menu a:hover,.menu a:focus-visible{background:var(--fill)}
+.spin svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin svg{animation:none}}
+
+/* Formulare */
+.login{max-width:380px;margin:16vh auto 0;padding:0 20px}
+.login h1{font-size:34px;font-weight:700;margin-bottom:22px}
+label{display:block;margin-top:14px;font-size:13px;color:var(--muted)}
+input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--ink);background:var(--fill);border:0;border-radius:10px;padding:11px 12px;margin-top:6px;-webkit-appearance:none;appearance:none}
+select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:16px;padding-right:34px}
+input[type=checkbox]{-webkit-appearance:auto;appearance:auto;accent-color:var(--accent);width:18px;height:18px;padding:0}
+input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45%,transparent)}
+.check{display:flex;gap:10px;align-items:flex-start;color:var(--ink);font-size:15px}
+.check input{width:18px;margin-top:2px}
+.fcheck{grid-column:1/-1}
+
+/* Blätter: am Handy von unten, am Rechner als Fenster */
+.lightbox{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:calc(28px + env(safe-area-inset-top)) 28px calc(28px + env(safe-area-inset-bottom));background:rgba(0,0,0,.38);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);cursor:zoom-out;animation:lbfade .2s ease-out}
+.lightbox img{display:block;max-width:min(86vw,620px);max-height:80vh;width:auto;height:auto;object-fit:contain;border-radius:14px;background:var(--fill);box-shadow:0 24px 70px rgba(0,0,0,.55);animation:lbzoom .22s cubic-bezier(.2,.8,.2,1)}
+.lightbox .lbclose{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:34px;height:34px;border-radius:50%;border:0;padding:0;font-size:18px;line-height:34px;color:#fff;background:rgba(60,60,67,.6);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);cursor:pointer}
+@keyframes lbfade{from{opacity:0}to{opacity:1}}
+@keyframes lbzoom{from{transform:scale(.92);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.lightbox,.lightbox img{animation:none}}
+.dart img{cursor:zoom-in}
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.sheet{position:relative;background:var(--surface);width:100%;max-width:820px;max-height:93vh;overflow:auto;border-radius:16px 16px 0 0;padding:22px 20px calc(26px + env(safe-area-inset-bottom));box-shadow:var(--shadow)}
+.sheet::before{content:"";position:absolute;top:7px;left:50%;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--faint)}
+@media (prefers-reduced-motion:no-preference){.sheet{animation:up .32s cubic-bezier(.2,.9,.25,1)}@keyframes up{from{transform:translateY(40px);opacity:.4}}}
+@media (min-width:760px){
+  .backdrop{align-items:center;padding:4vh 20px}
+  .sheet{border-radius:22px;max-height:90vh;padding:26px 30px 30px}
+  .sheet::before{display:none}
+  @media (prefers-reduced-motion:no-preference){.sheet{animation:pop .28s cubic-bezier(.2,.9,.25,1)}@keyframes pop{from{transform:scale(.96);opacity:0}}}
+}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+.sheet-head h2{font-size:22px;font-weight:700}
+.searchrow{display:flex;gap:8px}
+.searchrow input{margin-top:0}
+.results{list-style:none;padding:0;margin:12px 0 0}
+.pick{display:flex;gap:12px;align-items:center;width:100%;background:none;border:0;border-bottom:.5px solid var(--line);padding:9px 0;text-align:left;color:inherit}
+.pick:hover{background:var(--fill)}
+.pick img,.noimg{width:44px;height:61px;object-fit:contain;border-radius:4px;flex:none}
+.noimg{background:var(--fill)}
+.pick small{display:block;color:var(--muted)}
+.preview{display:flex;gap:16px;margin-top:12px}
+.preview img{width:104px;height:auto;border-radius:7px;align-self:flex-start;box-shadow:var(--poster-shadow)}
+.preview p{margin:2px 0}
+.preview h3{font-size:20px}
+.okmsg{margin:10px 0;padding:12px 14px;border-radius:12px;background:var(--tint)}
+.scanrow{margin:4px 0 12px}
+.scanrow button{width:100%}
+.scanrow p{margin:8px 0 0;font-size:13px}
+.scanprev{display:flex;gap:12px;align-items:flex-start;margin-top:10px}
+.scanprev img{width:96px;height:auto;border-radius:7px;flex:none}
+.preview img.scanmini{outline:2px solid var(--accent);outline-offset:2px}
+.scanhint{margin:12px 0 4px;padding:12px 14px;border-radius:12px;background:var(--tint);font-size:14px}
+.scanhint ul{margin:6px 0 0;padding-left:18px}
+.scanhint li{margin:3px 0}
+.scanhint .warn{font-weight:600}
+.banner,.hintbox{margin:0 0 14px;padding:12px 14px;border-radius:12px;background:var(--tint);font-size:14px}
+.banner.bad{background:color-mix(in srgb,var(--danger) 16%,transparent)}
+.banner a{color:inherit;font-weight:600}
+.hintbox{margin:4px 0 10px}
+.jobline{font-size:13px}
+
+/* Kartenansicht */
+.dtop{display:grid;grid-template-columns:minmax(120px,42%) minmax(0,1fr);grid-template-areas:"art info" "stats stats";gap:16px 18px;align-items:start;margin-top:4px}
+@media (min-width:600px){.dtop{grid-template-columns:250px minmax(0,1fr);grid-template-areas:"art info" "art stats";gap:12px 28px;align-content:start}}
+.dart{grid-area:art;aspect-ratio:63/88;border-radius:12px;background:var(--fill);overflow:hidden;display:flex;align-items:center;justify-content:center;box-shadow:var(--poster-shadow)}
+.dart img{width:100%;height:100%;object-fit:contain}
+.dinfo{grid-area:info;display:flex;flex-direction:column;gap:6px;min-width:0}
+.dinfo p{margin:0}
+.dprice{font-size:clamp(1.9rem,7vw,2.6rem);font-weight:700;letter-spacing:-.025em;font-variant-numeric:tabular-nums;margin-top:6px!important}
+.dprice.prov{color:var(--muted)}
+.dsmall{font-size:13px}
+.dstatswrap{grid-area:stats;min-width:0}
+.dstats{margin:0}
+.drow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-top:.5px solid var(--line);font-size:15px}
+.drow dt{color:var(--muted)}
+.drow dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.drow small{color:var(--muted);font-size:12px}
+.drow.mine dt{color:var(--ink);font-weight:600}
+.dnote{margin:6px 0 0;color:var(--muted);font-size:12px}
+.dsec{margin-top:28px}
+.dsec h3{font-size:20px;font-weight:700;margin-bottom:8px}
+.dsec h4{font-size:13px;margin:16px 0 2px;color:var(--muted);font-weight:600}
+.dsec .hist{margin:0}
+.hist{margin:12px 0}
+.hist svg{width:100%;height:120px;display:block}
+.range{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px;white-space:nowrap}
+.ctab{width:100%;border-collapse:collapse;font-size:15px;margin-top:4px}
+.ctab th,.ctab td{padding:10px 4px;border-top:.5px solid var(--line);text-align:left;vertical-align:baseline;font-weight:400}
+.ctab thead th{border-top:0;color:var(--muted);font-size:12px;padding-top:0}
+.ctab td.num,.ctab th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ctab tbody th small{display:block;color:var(--muted);font-size:12px}
+.ctab tr.own th,.ctab tr.own td.price{font-weight:700}
+.ctab tr.can{cursor:pointer}
+.ctab tr.can:hover>*{background:var(--fill)}
+.ctab .cbtn{all:unset;cursor:pointer;font:inherit;color:inherit}
+.ctab .cbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.ctab .chev{display:inline-block;width:1.1em;color:var(--muted);font-size:.85em}
+.ctab tr.exp>td{padding:0 0 10px;border-top:0;font-size:1rem}
+.ctab tr.exp .sales{margin:0}
+.ctab .own-mark{font-size:11px;padding:1px 6px;margin-left:4px;vertical-align:1px;white-space:nowrap;display:inline-block;font-weight:600;background:var(--tint);color:var(--accent)}
+.dform{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end}
+.dform label{margin-top:0}
+.fcond,.ffin{grid-column:1/-1}
+.fwide{grid-column:1/-1}
+@media (min-width:600px){.dform{grid-template-columns:1.3fr 1fr .6fr 1fr}.fcond,.ffin{grid-column:auto}}
+.dactions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap}
+.dangerlink{background:none;border:0;padding:8px 0;color:var(--danger);font-weight:500}
+.sales{list-style:none;margin:8px 0 0;padding:0}
+.sale{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"sd sp" "st st" "stl sx";gap:4px 12px;padding:11px 0;border-top:.5px solid var(--line);align-items:center}
+.sale.hasimg{grid-template-columns:2.8rem minmax(0,1fr) auto;grid-template-areas:"img sd sp" "img st st" "img stl sx"}
+.sale .sd{grid-area:sd;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.sale .st{grid-area:st;display:flex;flex-wrap:nowrap;gap:4px;min-width:0;overflow:hidden}
+.sale .st .tag{white-space:nowrap;flex:none}
+.stpick{position:relative;color:var(--ink);padding-right:17px;cursor:pointer;
+  background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%238e8e93'/%3E%3C/svg%3E") no-repeat right 5px center}
+.stpick.manual{box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
+/* Unsichtbare Auswahl über dem Label: öffnet die native Auswahl; 16px Schrift verhindert das Hineinzoomen auf dem iPhone */
+.stpick select{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;opacity:0;font-size:16px;cursor:pointer;border-radius:5px}
+.stpick:focus-within{box-shadow:0 0 0 2px var(--accent)}
+.stpick.busy{opacity:.5}
+.sale .sp{grid-area:sp;font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.sale .sp small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+.sale .stl{grid-area:stl;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;min-width:0}
+.sale .stl:hover{color:var(--accent)}
+.sale .sx{grid-area:sx;padding:4px 12px;font-size:13px;justify-self:end}
+.sale .simg{grid-area:img;align-self:start;width:2.8rem;height:3.8rem;border-radius:5px;overflow:hidden;background:var(--fill);display:block}
+.sale .simg img{width:100%;height:100%;object-fit:cover;display:block}
+.sale.off .sp{color:var(--muted)}
+details.more{margin-top:14px;font-size:14px;color:var(--muted)}
+details.more summary{cursor:pointer;padding:6px 0}
+details.more .sales{color:var(--ink);padding-left:0;margin:4px 0 0;font-size:1rem}
+details.more ul{margin:6px 0 0;padding-left:18px}
+details.rgrp{margin:4px 0 0 2px}
+details.rgrp>summary{cursor:pointer;padding:8px 0;color:var(--ink);font-size:15px}
+details.rgrp>p{margin:2px 0 4px}
+.plines{list-style:none;padding:0;margin:12px 0 0}
+.plines li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:9px 0;border-bottom:.5px solid var(--line)}
+.plines small{grid-column:1/-1;color:var(--muted)}
+
+/* ---------- Ergänzungen für den Snipe-Scout ---------- */
+.section-title{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.section-title small{font-size:14px;font-weight:400;color:var(--muted)}
+.block{margin-top:30px}
+.thumb.ph{display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:11px;font-weight:600}
+.big{font-size:17px}
+.price .lbl{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.tag.hot{background:var(--tint);color:var(--accent)}
+.tag.soon{background:color-mix(in srgb,var(--danger) 16%,transparent);color:var(--danger)}
+.seg.main{display:inline-flex;margin:0 0 14px}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 10px;flex-wrap:wrap}
+.toolbar select{width:auto;margin:0;padding:7px 30px 7px 12px;font-size:15px;border-radius:999px;
+  background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%238e8e93'/%3E%3C/svg%3E") no-repeat right 12px center}
+.feed .sale{padding:11px 16px;border-top:0}
+.feed li+li .sale{border-top:.5px solid var(--line)}
+.feed{background:var(--surface);border-radius:14px;overflow:hidden;list-style:none;margin:0;padding:0}
+.sale .card{font-weight:600;color:var(--ink)}
+/* Diagramm */
+.chart{position:relative;margin:6px 0 4px}
+.chart svg{width:100%;height:220px;display:block;overflow:visible}
+.chart .grid line{stroke:var(--line);stroke-width:1}
+.chart .axis text{fill:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.chart .dot{fill:var(--accent);stroke:var(--surface);stroke-width:2}
+.chart .dot.off{fill:var(--surface);stroke:var(--faint);stroke-width:1.5}
+.chart .dot.hl{stroke:var(--ink);stroke-width:2}
+.chart .ref{stroke-width:2;stroke-dasharray:5 4;fill:none}
+.chart .ref.fair{stroke:var(--muted)}
+.chart .ref.bid{stroke:var(--ink)}
+.chart .reflbl{font-size:11px;font-weight:600;fill:var(--ink);paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+.chart .reflbl.fair{fill:var(--muted)}
+.tip{position:absolute;pointer-events:none;background:var(--glass);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+  box-shadow:var(--shadow);border-radius:10px;padding:8px 10px;font-size:13px;line-height:1.35;min-width:150px;max-width:240px;transform:translate(-50%,calc(-100% - 12px));z-index:2}
+.tip b{font-variant-numeric:tabular-nums}
+.tip small{display:block;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--muted);font-size:12px;margin:4px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.legend i.off{background:transparent;border:1.5px solid var(--faint);width:9px;height:9px}
+.legend i.line{width:16px;height:0;border-radius:0;border-top:2px dashed var(--muted);background:none}
+.legend i.line.bid{border-top-color:var(--ink)}
+.copy{white-space:nowrap}
+.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.btnrow a{text-decoration:none}
+.sheet>.dprice{margin:6px 0 2px!important}
+.toolbar select{max-width:100%}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(() => {
+"use strict";
+
+// Dieselbe Supabase wie der Karten-Tracker – gleiche Anmeldung
+const SUPABASE_URL = "https://etybhxsxnovicwlsoiha.supabase.co";
+const SUPABASE_KEY = "sb_publishable_L4T61xqNhqn9QyOYW_IGPg_I70TkeeL";
+const SCOUT_ACTIONS = "https://github.com/mosc0001/snipe-scout/actions";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const eur = (n, d = 0) => (n == null || Number.isNaN(Number(n))) ? "–" :
+  new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: d, minimumFractionDigits: d }).format(n);
+const dateDE = d => d ? new Date(String(d).length === 10 ? d + "T12:00:00" : d).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "";
+const dtDE = d => d ? new Date(d).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+const ago = d => {
+  if (!d) return "nie";
+  const m = Math.round((Date.now() - new Date(d)) / 60000);
+  if (m < 1) return "gerade eben";
+  if (m < 60) return `vor ${m} Min.`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `vor ${h} Std.`;
+  return `vor ${Math.round(h / 24)} Tagen`;
+};
+const until = d => {
+  const m = Math.round((new Date(d) - Date.now()) / 60000);
+  if (m <= 0) return "beendet";
+  if (m < 60) return `noch ${m} Min.`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `noch ${h} Std. ${m % 60} Min.`;
+  return `noch ${Math.floor(h / 24)} T. ${h % 24} Std.`;
+};
+const FORMAT = { auction: "Auktion", best_offer: "Preisvorschlag", fixed_price: "Sofort-Kaufen", buy_it_now: "Sofort-Kaufen" };
+const ICON_MORE = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
+
+const state = { cards: [], sales: [], cands: [], runs: [], tab: "cards", feedCard: "", setupMissing: false };
+try { state.tab = localStorage.getItem("ss_tab") === "sales" ? "sales" : "cards"; } catch (e) { /* ohne Speicher */ }
+
+/* ---------- Anmeldung (wie im Tracker) ---------- */
+function renderLogin(msg = "") {
+  $("#app").innerHTML = `
+    <main class="login">
+      <h1>Snipe-Scout</h1>
+      <input id="em" type="email" placeholder="E-Mail" autocomplete="username">
+      <input id="pw" type="password" placeholder="Passwort" autocomplete="current-password" style="margin-top:10px">
+      <button id="go" class="primary wide">Anmelden</button>
+      <p class="err" id="err">${esc(msg)}</p>
+    </main>`;
+  const go = async () => {
+    $("#err").textContent = "";
+    const { error } = await db.auth.signInWithPassword({ email: $("#em").value.trim(), password: $("#pw").value });
+    if (error) $("#err").textContent = "Anmeldung fehlgeschlagen: " + error.message;
+  };
+  $("#go").onclick = go;
+  $("#pw").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+}
+
+/* ---------- Daten ---------- */
+async function load() {
+  $("#app").innerHTML = `<p class="muted pad">Snipe-Scout wird geladen …</p>`;
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const [c, s, k, r] = await Promise.all([
+    db.from("snipe_cards").select("*").order("name"),
+    db.from("snipe_sales").select("*").order("sold_at", { ascending: false }).limit(3000),
+    db.from("snipe_candidates").select("*").gte("end_at", since).order("end_at"),
+    db.from("snipe_runs").select("*").order("at", { ascending: false }).limit(30),
+  ]);
+  const err = [c, s, k, r].find(x => x.error);
+  if (err) {
+    const missing = /does not exist|schema cache|42P01|PGRST205/i.test(err.error.message + " " + (err.error.code || ""));
+    state.setupMissing = missing;
+    if (!missing) { $("#app").innerHTML = `<p class="err pad">Laden fehlgeschlagen: ${esc(err.error.message)}</p>`; return; }
+  }
+  state.cards = c.data || [];
+  state.sales = s.data || [];
+  state.cands = k.data || [];
+  state.runs = r.data || [];
+  render();
+}
+
+const salesOf = id => state.sales.filter(x => x.card_id === id);
+const imgOf = id => {
+  const live = state.cands.find(x => x.card_id === id && x.image);
+  if (live) return live.image;
+  const s = state.sales.find(x => x.card_id === id && x.image && x.used);
+  return s ? s.image : null;
+};
+const cardById = id => state.cards.find(c => c.id === id) || { id, name: id };
+const thumb = (src, alt = "") => src
+  ? `<img class="thumb" src="${esc(src)}" alt="${esc(alt)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb ph',textContent:'PSA'}))">`
+  : `<span class="thumb ph" aria-hidden="true">PSA</span>`;
+
+/* ---------- Hauptansicht ---------- */
+function render() {
+  const active = state.cards.filter(c => c.active);
+  const now = Date.now();
+  const live = state.cands.filter(x => new Date(x.end_at) > now);
+  const ended = state.cands.filter(x => new Date(x.end_at) <= now).reverse();
+  const lastScout = state.runs.find(r => r.kind === "scout");
+  const lastComps = active.map(c => c.comps_at).filter(Boolean).sort().pop();
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const usdMonth = state.runs.filter(r => new Date(r.at) >= monthStart).reduce((a, r) => a + Number(r.apify_usd || 0), 0);
+
+  $("#app").innerHTML = `
+    <div class="wrap" id="wrap">
+      <header class="top">
+        <span class="ntitle" aria-hidden="true">Snipe-Scout</span>
+        <div class="actions">
+          <a class="ghost" href="./" style="text-decoration:none">Sammlung</a>
+          <div class="menuwrap">
+            <button id="menubtn" class="iconbtn" aria-label="Menü" title="Menü" aria-haspopup="true" aria-expanded="false">${ICON_MORE}</button>
+            <div id="menu" class="menu" role="menu" hidden>
+              <button role="menuitem" id="reload">Aktualisieren</button>
+              <a role="menuitem" href="${SCOUT_ACTIONS}/workflows/scout.yml" target="_blank" rel="noopener">Scout jetzt starten (GitHub)</a>
+              <a role="menuitem" href="https://github.com/mosc0001/snipe-scout/edit/main/watchlist.yaml" target="_blank" rel="noopener">Watchlist bearbeiten (GitHub)</a>
+              <a role="menuitem" href="https://www.gixen.com/" target="_blank" rel="noopener">Gixen öffnen</a>
+              <button role="menuitem" id="logout">Abmelden</button>
+            </div>
+          </div>
+        </div>
+      </header>
+      <h1 class="ltitle">Snipe-Scout</h1>
+      <p class="status" role="status">Letzter Scout-Lauf ${esc(ago(lastScout && lastScout.at))} · Fairwerte ${esc(ago(lastComps))}${usdMonth ? ` · Apify diesen Monat ${usdMonth.toFixed(2).replace(".", ",")} $` : ""}</p>
+      ${state.setupMissing ? `<p class="banner" role="note">Die Tabellen fehlen noch. Bitte <b>snipe.sql</b> im Supabase SQL-Editor ausführen und danach den Fairwert-Test im snipe-scout-Repository starten.</p>` : ""}
+      ${!state.setupMissing && !state.cards.length ? `<p class="banner" role="note">Noch keine Daten. Starte im snipe-scout-Repository unter Actions den <b>fairwert-test</b> – danach erscheinen hier deine Karten und Verkäufe.</p>` : ""}
+
+      <section class="block" aria-labelledby="h-live">
+        <h2 class="section-title" id="h-live">Laufende Treffer <small>${live.length ? live.length + " unter Höchstgebot" : ""}</small></h2>
+        ${live.length ? `<ul class="list" id="live">${live.map(candRow).join("")}</ul>`
+          : `<p class="empty" style="padding:22px 0">Gerade keine Auktion unter deinem Höchstgebot.${lastScout ? "" : " Der Scout ist noch nicht gelaufen."}</p>`}
+        ${ended.length ? `<details class="more"><summary>Beendete Treffer der letzten 30 Tage (${ended.length})</summary>
+          <ul class="list" id="ended" style="margin-top:8px">${ended.map(candRow).join("")}</ul></details>` : ""}
+      </section>
+
+      <section class="block">
+        <div class="seg main" role="group" aria-label="Ansicht">
+          <button data-tab="cards" class="${state.tab === "cards" ? "on" : ""}" aria-pressed="${state.tab === "cards"}">Karten (${active.length})</button>
+          <button data-tab="sales" class="${state.tab === "sales" ? "on" : ""}" aria-pressed="${state.tab === "sales"}">Verkäufe (${state.sales.filter(s => s.used).length})</button>
+        </div>
+        <div id="tabbody">${state.tab === "cards" ? cardsHtml(active) : feedHtml(active)}</div>
+        ${state.tab === "cards" && state.cards.some(c => !c.active) ? `<details class="more"><summary>Pausierte oder entfernte Karten (${state.cards.filter(c => !c.active).length})</summary>
+          <ul class="list" style="margin-top:8px">${state.cards.filter(c => !c.active).map(cardRow).join("")}</ul></details>` : ""}
+      </section>
+      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
+    </div>`;
+
+  wire();
+}
+
+function candRow(x) {
+  const c = cardById(x.card_id);
+  const left = new Date(x.end_at) - Date.now();
+  const soon = left > 0 && left < 3 * 3600000;
+  return `<li><button class="row" data-cand="${esc(x.item_id)}">
+    ${thumb(x.image)}
+    <span style="min-width:0">
+      <span class="name">${esc(c.name)}</span>
+      <span class="rset">${esc(x.title || "")}</span>
+      <span class="meta"><span class="tag ${soon ? "soon" : "hot"}">${esc(left > 0 ? until(x.end_at) : "beendet " + dateDE(x.end_at))}</span>
+        <span class="tag">${esc(x.country || "?")}${x.non_eu ? " · Nicht-EU" : ""}</span><span class="tag">${x.bids ?? 0} Gebote</span></span>
+    </span>
+    <span class="price"><span class="lbl">Höchstgebot</span><span class="big">${eur(x.max_bid_eur)}</span><small>aktuell ${eur(x.current_eur)}</small></span>
+  </button></li>`;
+}
+
+function cardRow(c) {
+  const n = salesOf(c.id).filter(s => s.used).length;
+  return `<li><button class="row" data-card="${esc(c.id)}">
+    ${thumb(imgOf(c.id), c.name)}
+    <span style="min-width:0">
+      <span class="name">${esc(c.name)}</span>
+      <span class="rset">${c.fair_low != null ? `Spanne ${eur(c.fair_low)} – ${eur(c.fair_high)}` : "Noch kein Fairwert"}</span>
+      <span class="meta"><span class="tag">${esc(String(c.language || "en").toUpperCase())}</span>
+        ${c.fair_n ? `<span class="tag">${c.fair_n} Verkäufe</span>` : n ? `<span class="tag">${n} Verkäufe</span>` : ""}
+        <span class="tag">−${Math.round(Number(c.discount || 0) * 100)} %</span>
+        ${state.cands.some(x => x.card_id === c.id && new Date(x.end_at) > Date.now()) ? `<span class="tag hot">Treffer</span>` : ""}</span>
+    </span>
+    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>max. ${eur(c.max_bid_eur)}</small></span>
+  </button></li>`;
+}
+
+function cardsHtml(active) {
+  if (!active.length) return `<p class="empty">Keine aktiven Karten.</p>`;
+  return `<ul class="list" id="cards">${active.map(cardRow).join("")}</ul>`;
+}
+
+function saleLi(s, withCard) {
+  const fmt = FORMAT[s.format] || (s.format ? s.format : "");
+  return `<li><div class="sale${s.used ? "" : " off"}${s.image ? " hasimg" : ""}">
+    ${s.image ? `<span class="simg"><img src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></span>` : ""}
+    <span class="sd">${esc(dateDE(s.sold_at))}${withCard ? ` · <span class="card">${esc(cardById(s.card_id).name)}</span>` : ""}</span>
+    <span class="sp">${eur(s.price_eur, 2)}${s.ask_eur ? `<small>Angebot ${eur(s.ask_eur, 2)}</small>` : ""}</span>
+    <span class="st">${fmt ? `<span class="tag">${esc(fmt)}</span>` : ""}${s.used ? "" : `<span class="tag">Ausreißer</span>`}</span>
+    ${s.url ? `<a class="stl" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || "Angebot öffnen")}</a>` : `<span class="stl">${esc(s.title || "")}</span>`}
+  </div></li>`;
+}
+
+function feedHtml(active) {
+  const list = state.sales.filter(s => s.used && (!state.feedCard || s.card_id === state.feedCard));
+  return `<div class="toolbar">
+      <select id="feedcard" aria-label="Karte">
+        <option value="">Alle Karten</option>
+        ${active.map(c => `<option value="${esc(c.id)}"${c.id === state.feedCard ? " selected" : ""}>${esc(c.name)}</option>`).join("")}
+      </select>
+      <span class="muted" style="font-size:14px">${list.length} Verkäufe · neueste zuerst</span>
+    </div>
+    ${list.length ? `<ul class="feed">${list.slice(0, 300).map(s => saleLi(s, !state.feedCard)).join("")}</ul>` : `<p class="empty">Noch keine Verkäufe gespeichert.</p>`}`;
+}
+
+function wire() {
+  const mb = $("#menubtn"), m = $("#menu");
+  mb.onclick = e => { e.stopPropagation(); m.hidden = !m.hidden; mb.setAttribute("aria-expanded", String(!m.hidden)); };
+  document.onclick = e => { if (!m.hidden && !m.contains(e.target)) closeMenu(); };
+  $("#logout").onclick = () => db.auth.signOut();
+  $("#reload").onclick = () => { closeMenu(); load(); };
+  document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
+    state.tab = b.dataset.tab;
+    try { localStorage.setItem("ss_tab", state.tab); } catch (e) { /* egal */ }
+    render();
+  });
+  const fc = $("#feedcard");
+  if (fc) fc.onchange = () => { state.feedCard = fc.value; render(); };
+  $("#wrap").addEventListener("click", e => {
+    const c = e.target.closest("[data-card]");
+    if (c) return openCard(c.dataset.card);
+    const k = e.target.closest("[data-cand]");
+    if (k) return openCand(k.dataset.cand);
+  });
+  const onScroll = () => document.body.classList.toggle("scrolled", window.scrollY > 40);
+  window.onscroll = onScroll;
+  onScroll();
+}
+
+function closeMenu(focusButton) {
+  const m = $("#menu"), mb = $("#menubtn");
+  if (!m || m.hidden) return false;
+  m.hidden = true;
+  if (mb) { mb.setAttribute("aria-expanded", "false"); if (focusButton) mb.focus(); }
+  return true;
+}
+
+/* ---------- Blätter (wie im Tracker) ---------- */
+function openSheet(html) {
+  closeSheet();
+  const el = document.createElement("div");
+  el.className = "backdrop";
+  el.id = "sheet";
+  el.innerHTML = `<section class="sheet" role="dialog" aria-modal="true">${html}</section>`;
+  el.addEventListener("click", e => { if (e.target === el) closeSheet(); });
+  document.body.appendChild(el);
+  document.body.classList.add("lock");
+  const sheet = el.firstElementChild;
+  sheet.querySelectorAll("[data-close]").forEach(b => b.onclick = closeSheet);
+  return sheet;
+}
+function closeSheet() {
+  const el = $("#sheet");
+  if (el) el.remove();
+  document.body.classList.remove("lock");
+}
+
+function openCand(itemId) {
+  const x = state.cands.find(k => k.item_id === itemId);
+  if (!x) return;
+  const c = cardById(x.card_id);
+  const total = Number(x.max_bid_eur || 0) + Number(x.shipping_eur || 0);
+  const sheet = openSheet(`
+    <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
+    <p class="dsmall muted" style="margin:0">${esc(x.title || "")}</p>
+    <p class="dprice">${eur(x.max_bid_eur)}</p>
+    <p class="dsmall muted" style="margin:0 0 10px">Höchstgebot für Gixen · Ende ${esc(dtDE(x.end_at))} (${esc(until(x.end_at))})</p>
+    <dl class="dstats">
+      <div class="drow"><dt>Aktuelles Gebot</dt><dd>${eur(x.current_eur, 2)} <small>${x.bids ?? 0} Gebote</small></dd></div>
+      <div class="drow"><dt>Fairwert</dt><dd>${eur(x.fair_eur)}</dd></div>
+      <div class="drow"><dt>Versand</dt><dd>${eur(x.shipping_eur, 2)}${x.shipping_known ? "" : " <small>geschätzt</small>"}</dd></div>
+      <div class="drow"><dt>Herkunft</dt><dd>${esc(x.country || "?")}${x.non_eu ? " <small>Nicht-EU, EUSt eingerechnet</small>" : ""}</dd></div>
+      <div class="drow"><dt>Gesamt bei Höchstgebot</dt><dd>${x.non_eu ? "inkl. Einfuhr ≤ Budget" : eur(total)}</dd></div>
+      <div class="drow"><dt>Verkäufer</dt><dd>${esc(x.seller || "")}</dd></div>
+      <div class="drow"><dt>Artikelnummer</dt><dd><code>${esc(x.item_id)}</code></dd></div>
+    </dl>
+    <div class="btnrow">
+      ${x.url ? `<a class="primary" href="${esc(x.url)}" target="_blank" rel="noopener">Bei eBay ansehen</a>` : ""}
+      <button class="ghost copy" id="copyid">Artikelnr. kopieren</button>
+      <a class="ghost" href="https://www.gixen.com/" target="_blank" rel="noopener">Gixen öffnen</a>
+    </div>
+    <p class="dnote">Vor dem Eintragen: Cert-Nummer auf dem Slab-Foto bei PSA prüfen und Sprache/Set-Nummer auf den Fotos abgleichen.</p>`);
+  $("#copyid", sheet).onclick = async e => {
+    try { await navigator.clipboard.writeText(x.item_id); e.target.textContent = "Kopiert ✓"; }
+    catch (err) { e.target.textContent = x.item_id; }
+  };
+}
+
+function openCard(id) {
+  const c = cardById(id);
+  const all = salesOf(id);
+  const used = all.filter(s => s.used);
+  const st = c.comps_stats || {};
+  const off = st.offer_details || {};
+  const live = state.cands.filter(x => x.card_id === id && new Date(x.end_at) > Date.now());
+  const sheet = openSheet(`
+    <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
+    <p class="dprice">${c.fair_eur != null ? eur(c.fair_eur) : "–"}</p>
+    <p class="dsmall muted" style="margin:0 0 10px">Fairwert PSA 10 · ${c.fair_n ? `Median aus ${c.fair_n} Verkäufen` : "noch zu wenige Verkäufe"}${c.comps_source ? " · " + esc(c.comps_source) : ""} · Stand ${esc(ago(c.comps_at))}</p>
+    <dl class="dstats">
+      <div class="drow mine"><dt>Höchstgebot (Richtwert)</dt><dd>${eur(c.max_bid_eur)} <small>bei EU-Versand</small></dd></div>
+      <div class="drow"><dt>Spanne</dt><dd>${c.fair_low != null ? `${eur(c.fair_low)} – ${eur(c.fair_high)}` : "–"}</dd></div>
+      <div class="drow"><dt>Sicherheitsabschlag</dt><dd>${Math.round(Number(c.discount || 0) * 100)} %</dd></div>
+      <div class="drow"><dt>Budgetgrenze inkl. Versand</dt><dd>${c.max_total_eur ? eur(c.max_total_eur) : "keine"}</dd></div>
+      ${off.angefragt ? `<div class="drow"><dt>Preisvorschläge geprüft</dt><dd>${off["Betrag ermittelt"] || 0} von ${off.angefragt} <small>gezahlter Betrag ermittelt</small></dd></div>` : ""}
+      <div class="drow"><dt>Laufende Treffer</dt><dd>${live.length}</dd></div>
+      <div class="drow"><dt>Suchbegriff</dt><dd><small>${esc(c.search || "")}</small></dd></div>
+    </dl>
+    <section class="dsec">
+      <h3>Verkäufe</h3>
+      ${all.length ? `<div class="chart" id="chart"></div>
+        <div class="legend" aria-hidden="true"><span><i></i>Verkauf</span><span id="lgoff" hidden><i class="off"></i>Ausreißer</span>
+          <span><i class="line"></i>Fairwert</span><span><i class="line bid"></i>Höchstgebot</span></div>` : `<p class="muted">Noch keine Verkäufe gespeichert.</p>`}
+      ${all.length ? `<div class="toolbar" style="margin-top:14px"><span class="muted" style="font-size:14px">${used.length} Verkäufe${all.length > used.length ? `, ${all.length - used.length} Ausreißer` : ""}</span>
+        ${all.length > used.length ? `<label class="toggle"><input type="checkbox" id="showoff" style="width:auto;display:inline;margin:0"> Ausreißer zeigen</label>` : ""}</div>
+        <ul class="sales" id="slist">${used.map(s => saleLi(s, false)).join("")}</ul>` : ""}
+    </section>`);
+  // Ausreißer sind standardmäßig ausgeblendet, damit sie die Preisachse nicht strecken
+  if (all.length) drawChart($("#chart", sheet), used.length ? used : all, c);
+  const so = $("#showoff", sheet);
+  if (so) so.onchange = () => {
+    const list = so.checked ? all : used;
+    $("#slist", sheet).innerHTML = list.map(s => saleLi(s, false)).join("");
+    $("#lgoff", sheet).hidden = !so.checked;
+    drawChart($("#chart", sheet), list, c);
+  };
+}
+
+/* ---------- Diagramm: Verkäufe über die Zeit, Fairwert und Höchstgebot als Referenzlinien ---------- */
+function drawChart(host, sales, card) {
+  const W = Math.max(280, host.clientWidth || 600), H = 220, P = { l: 48, r: 12, t: 14, b: 26 };
+  const pts = sales.map(s => ({ s, t: new Date(s.sold_at + "T12:00:00").getTime(), v: Number(s.price_eur) }))
+    .filter(p => isFinite(p.t) && isFinite(p.v)).sort((a, b) => a.t - b.t);
+  if (!pts.length) return;
+  const DAY = 86400000;
+  let t0 = Math.min(...pts.map(p => p.t)), t1 = Math.max(...pts.map(p => p.t), Date.now());
+  if (t1 - t0 < 7 * DAY) t0 = t1 - 7 * DAY;
+  const refs = [card.fair_eur, card.max_bid_eur].filter(v => v != null).map(Number);
+  let v0 = Math.min(...pts.map(p => p.v), ...refs), v1 = Math.max(...pts.map(p => p.v), ...refs);
+  const step = niceStep((v1 - v0) / 4 || 50);
+  v0 = Math.max(0, Math.floor(v0 / step) * step); v1 = Math.ceil(v1 / step) * step;
+  if (v1 === v0) v1 = v0 + step;
+  const x = t => P.l + (t - t0) / (t1 - t0) * (W - P.l - P.r);
+  const y = v => P.t + (1 - (v - v0) / (v1 - v0)) * (H - P.t - P.b);
+  const yt = []; for (let v = v0; v <= v1 + 1e-9; v += step) yt.push(v);
+  const xt = []; const spanD = (t1 - t0) / DAY; const xs = spanD > 60 ? 30 : spanD > 21 ? 14 : 7;
+  for (let t = t1; t >= t0; t -= xs * DAY) xt.unshift(t);
+  const fmtD = t => new Date(t).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+  const ref = (v, cls, label, dy) => v == null ? "" : `<line class="ref ${cls}" x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}"/>
+    <text class="reflbl ${cls}" x="${W - P.r}" y="${y(v) + dy}" text-anchor="end">${esc(label)} ${esc(eur(v))}</text>`;
+  const fairAboveBid = card.fair_eur != null && card.max_bid_eur != null && card.fair_eur >= card.max_bid_eur;
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verkaufspreise von ${esc(card.name)} über die Zeit">
+    <g class="grid">${yt.map(v => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}"/>`).join("")}</g>
+    <g class="axis">${yt.map(v => `<text x="${P.l - 8}" y="${y(v) + 4}" text-anchor="end">${esc(eur(v))}</text>`).join("")}
+      ${xt.map(t => `<text x="${x(t)}" y="${H - 6}" text-anchor="middle">${fmtD(t)}</text>`).join("")}</g>
+    ${ref(card.fair_eur != null ? Number(card.fair_eur) : null, "fair", "Fairwert", fairAboveBid ? -6 : 14)}
+    ${ref(card.max_bid_eur != null ? Number(card.max_bid_eur) : null, "bid", "Höchstgebot", fairAboveBid ? 14 : -6)}
+    <g id="dots">${pts.map((p, i) => `<circle class="dot${p.s.used ? "" : " off"}" data-i="${i}" cx="${x(p.t)}" cy="${y(p.v)}" r="4.5"/>`).join("")}</g>
+  </svg><div class="tip" hidden></div>`;
+  const svg = host.querySelector("svg"), tip = host.querySelector(".tip");
+  const dots = [...host.querySelectorAll(".dot")];
+  let cur = -1;
+  const show = ev => {
+    const r = svg.getBoundingClientRect(), k = W / r.width;
+    const mx = (ev.clientX - r.left) * k, my = (ev.clientY - r.top) * k;
+    let best = -1, bd = Infinity;
+    pts.forEach((p, i) => { const d = Math.hypot(x(p.t) - mx, y(p.v) - my); if (d < bd) { bd = d; best = i; } });
+    if (bd > 28) return hide();
+    if (cur >= 0) dots[cur].classList.remove("hl");
+    cur = best; dots[cur].classList.add("hl");
+    const p = pts[cur];
+    tip.innerHTML = `<b>${esc(eur(p.v, 2))}</b> · ${esc(dateDE(p.s.sold_at))}
+      <small>${esc(FORMAT[p.s.format] || p.s.format || "")}${p.s.ask_eur ? " · Angebot " + esc(eur(p.s.ask_eur, 2)) : ""}${p.s.used ? "" : " · Ausreißer"}</small>
+      <small>${esc((p.s.title || "").slice(0, 70))}</small>`;
+    tip.style.left = `${x(p.t) / k}px`; tip.style.top = `${y(p.v) / k}px`;
+    tip.hidden = false;
+  };
+  const hide = () => { tip.hidden = true; if (cur >= 0) dots[cur].classList.remove("hl"); cur = -1; };
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", hide);
+  svg.addEventListener("click", () => { if (cur >= 0 && pts[cur].s.url) window.open(pts[cur].s.url, "_blank", "noopener"); });
+}
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (closeMenu(true)) return;
+  if ($("#sheet")) closeSheet();
+});
+
+let uid = null;
+db.auth.onAuthStateChange((event, session) => {
+  const id = session && session.user ? session.user.id : null;
+  if (id === uid && event !== "INITIAL_SESSION") return;
+  uid = id;
+  setTimeout(() => { id ? load() : renderLogin(); }, 0);
+});
+})();
+</script>
+</body>
+</html>
