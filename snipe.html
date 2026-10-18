@@ -364,6 +364,9 @@ details.rgrp>p{margin:2px 0 4px}
 .block{margin-top:30px}
 .thumb.ph{display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:11px;font-weight:600}
 .big{font-size:17px}
+.sale .simg{cursor:zoom-in}
+.cimg{display:block;width:96px;aspect-ratio:3/4;margin:4px 0 12px;padding:0;border:0;border-radius:8px;overflow:hidden;background:var(--fill);cursor:zoom-in}
+.cimg img{width:100%;height:100%;object-fit:cover;display:block}
 .price .lbl{display:block;font-weight:400;color:var(--muted);font-size:12px}
 .tag.hot{background:var(--tint);color:var(--accent)}
 .tag.soon{background:color-mix(in srgb,var(--danger) 16%,transparent);color:var(--danger)}
@@ -595,14 +598,59 @@ function cardsHtml(active) {
   return `<ul class="list" id="cards">${active.map(cardRow).join("")}</ul>`;
 }
 
+// Saubere Angebotslinks (wie im Tracker): nur die Artikelnummer, ohne epid und Zusatzparameter.
+// nordt=true: eBay zeigt das beendete Angebot selbst, statt auf die allgemeine Produktseite umzuleiten.
+function ebayItemUrl(itemId, url) {
+  let id = String(itemId || "");
+  const v1 = id.match(/^v1\|(\d{1,20})\|/); if (v1) id = v1[1];
+  if (/^\d{1,20}$/.test(id)) return `https://www.ebay.de/itm/${id}?nordt=true`;
+  const m = String(url || "").match(/^https:\/\/www\.ebay\.[a-z.]+\/itm\/(?:[^/?#]*\/)?(\d{1,20})/i);
+  if (m) return `https://www.ebay.de/itm/${m[1]}?nordt=true`;
+  return /^https:\/\/www\.ebay\.[a-z.]+\//i.test(url || "") ? String(url).split(/[?#]/)[0] : null;
+}
+// Bilder nur von eBays Bildserver; Größe über den Dateinamen (s-l225 klein, s-l1600 groß)
+function ebayImg(src, size) {
+  if (typeof src !== "string" || !/^https:\/\/i\.ebayimg\.com\/[^\s"'<>]+$/.test(src)) return null;
+  return /\/s-l\d+\.(jpg|jpeg|png|webp)$/i.test(src) ? src.replace(/\/s-l\d+\.(jpg|jpeg|png|webp)$/i, `/s-l${size}.$1`) : src;
+}
+/* Leuchtkasten: Tipp aufs Angebotsfoto zeigt es groß (erst das kleine, dann das große nachladen).
+   Tipp daneben, aufs Bild, auf ✕ oder Escape schließt ihn. */
+function openLightbox(big, small, alt) {
+  closeLightbox();
+  const el = document.createElement("div");
+  el.className = "lightbox"; el.id = "lightbox";
+  el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-label", alt || "Bild");
+  el.innerHTML = `<img alt="${esc(alt || "")}" referrerpolicy="no-referrer"><button class="lbclose" aria-label="Schließen">✕</button>`;
+  const img = el.querySelector("img");
+  img.src = small || big;
+  if (big && big !== small) { const pre = new Image(); pre.referrerPolicy = "no-referrer"; pre.onload = () => { if (img.isConnected) img.src = big; }; pre.src = big; }
+  el.addEventListener("click", e => { e.stopPropagation(); closeLightbox(); });
+  document.body.appendChild(el);
+  document.body.classList.add("lock");
+  el.querySelector(".lbclose").focus({ preventScroll: true });
+}
+function closeLightbox() {
+  const el = $("#lightbox");
+  if (!el) return false;
+  el.remove();
+  if (!$("#sheet")) document.body.classList.remove("lock");
+  return true;
+}
+document.addEventListener("click", e => {
+  if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest("a.simg, a.cimg");
+  if (a) { e.preventDefault(); const im = a.querySelector("img"); openLightbox(a.href, im && im.currentSrc, "Angebotsfoto"); }
+});
+
 function saleLi(s, withCard) {
   const fmt = FORMAT[s.format] || (s.format ? s.format : "");
-  return `<li><div class="sale${s.used ? "" : " off"}${s.image ? " hasimg" : ""}">
-    ${s.image ? `<span class="simg"><img src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></span>` : ""}
+  const small = ebayImg(s.image, 225), big = ebayImg(s.image, 1600), link = ebayItemUrl(s.item_id, s.url);
+  return `<li><div class="sale${s.used ? "" : " off"}${small ? " hasimg" : ""}">
+    ${small ? `<a class="simg" href="${esc(big)}" target="_blank" rel="noopener" title="Foto groß ansehen"><img src="${esc(small)}" alt="Angebotsfoto" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.style.visibility='hidden'"></a>` : ""}
     <span class="sd">${esc(dateDE(s.sold_at))}${withCard ? ` · <span class="card">${esc(cardById(s.card_id).name)}</span>` : ""}</span>
     <span class="sp">${eur(s.price_eur, 2)}${s.ask_eur ? `<small>Angebot ${eur(s.ask_eur, 2)}</small>` : ""}</span>
     <span class="st">${fmt ? `<span class="tag">${esc(fmt)}</span>` : ""}${s.used ? "" : `<span class="tag">Ausreißer</span>`}</span>
-    ${s.url ? `<a class="stl" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || "Angebot öffnen")}</a>` : `<span class="stl">${esc(s.title || "")}</span>`}
+    ${link ? `<a class="stl" href="${esc(link)}" target="_blank" rel="noopener">${esc(s.title || "Angebot öffnen")}</a>` : `<span class="stl">${esc(s.title || "")}</span>`}
   </div></li>`;
 }
 
@@ -675,9 +723,11 @@ function openCand(itemId) {
   if (!x) return;
   const c = cardById(x.card_id);
   const total = Number(x.max_bid_eur || 0) + Number(x.shipping_eur || 0);
+  const link = ebayItemUrl(x.item_id, x.url), small = ebayImg(x.image, 500), big = ebayImg(x.image, 1600);
   const sheet = openSheet(`
     <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
     <p class="dsmall muted" style="margin:0">${esc(x.title || "")}</p>
+    ${small ? `<a class="cimg" href="${esc(big)}" target="_blank" rel="noopener" title="Foto groß ansehen"><img src="${esc(small)}" alt="Angebotsfoto" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></a>` : ""}
     <p class="dprice">${eur(x.max_bid_eur)}</p>
     <p class="dsmall muted" style="margin:0 0 10px">Höchstgebot für Gixen · Ende ${esc(dtDE(x.end_at))} (${esc(until(x.end_at))})</p>
     <dl class="dstats">
@@ -690,7 +740,7 @@ function openCand(itemId) {
       <div class="drow"><dt>Artikelnummer</dt><dd><code>${esc(x.item_id)}</code></dd></div>
     </dl>
     <div class="btnrow">
-      ${x.url ? `<a class="primary" href="${esc(x.url)}" target="_blank" rel="noopener">Bei eBay ansehen</a>` : ""}
+      ${link ? `<a class="primary" href="${esc(link)}" target="_blank" rel="noopener">Bei eBay ansehen</a>` : ""}
       <button class="ghost copy" id="copyid">Artikelnr. kopieren</button>
       <a class="ghost" href="https://www.gixen.com/" target="_blank" rel="noopener">Gixen öffnen</a>
     </div>
@@ -794,7 +844,7 @@ function drawChart(host, sales, card) {
   svg.addEventListener("pointermove", show);
   svg.addEventListener("pointerdown", show);
   svg.addEventListener("pointerleave", hide);
-  svg.addEventListener("click", () => { if (cur >= 0 && pts[cur].s.url) window.open(pts[cur].s.url, "_blank", "noopener"); });
+  svg.addEventListener("click", () => { const u = cur >= 0 && ebayItemUrl(pts[cur].s.item_id, pts[cur].s.url); if (u) window.open(u, "_blank", "noopener"); });
 }
 function niceStep(raw) {
   const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
@@ -803,6 +853,7 @@ function niceStep(raw) {
 
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
+  if (closeLightbox()) return;
   if (closeMenu(true)) return;
   if ($("#sheet")) closeSheet();
 });
