@@ -407,6 +407,14 @@ details.rgrp>p{margin:2px 0 4px}
 .btnrow a{text-decoration:none}
 .sheet>.dprice{margin:6px 0 2px!important}
 .toolbar select{max-width:100%}
+.addform label{margin-top:12px}
+.addform .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.addform small.hint{display:block;margin-top:4px;color:var(--muted);font-size:12px}
+.critwarn{margin:12px 0 0;padding:10px 12px;border-radius:12px;background:var(--fill);font-size:14px}
+.critwarn b{color:var(--ink)}
+.cardact{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.danger{color:#d70015}
+@media (prefers-color-scheme:dark){.danger{color:#ff6961}}
 </style>
 </head>
 <body>
@@ -420,6 +428,9 @@ details.rgrp>p{margin:2px 0 4px}
 const SUPABASE_URL = "https://etybhxsxnovicwlsoiha.supabase.co";
 const SUPABASE_KEY = "sb_publishable_L4T61xqNhqn9QyOYW_IGPg_I70TkeeL";
 const SCOUT_ACTIONS = "https://github.com/mosc0001/snipe-scout/actions";
+const TCGDEX = "https://api.tcgdex.net/v2";
+const DEFAULTS = { discount: 0.15, max_total_eur: 400 };   // wie in watchlist.yaml
+const UPDATE2_MSG = "Bitte zuerst snipe-update-2.sql im Supabase SQL Editor ausführen, dann erneut speichern.";
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -521,6 +532,7 @@ function render() {
       <header class="top">
         <span class="ntitle" aria-hidden="true">Snipe-Scout</span>
         <div class="actions">
+          <button id="addtop" class="primary addtop">+ Karte</button>
           <a class="ghost" href="./" style="text-decoration:none">Sammlung</a>
           <div class="menuwrap">
             <button id="menubtn" class="iconbtn" aria-label="Menü" title="Menü" aria-haspopup="true" aria-expanded="false">${ICON_MORE}</button>
@@ -556,6 +568,7 @@ function render() {
         ${state.tab === "cards" && state.cards.some(c => !c.active) ? `<details class="more"><summary>Pausierte oder entfernte Karten (${state.cards.filter(c => !c.active).length})</summary>
           <ul class="list" style="margin-top:8px">${state.cards.filter(c => !c.active).map(cardRow).join("")}</ul></details>` : ""}
       </section>
+      <button id="addfab" class="primary fab">+ Karte</button>
       <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
     </div>`;
 
@@ -581,7 +594,7 @@ function candRow(x) {
 function cardRow(c) {
   const n = salesOf(c.id).filter(s => s.used).length;
   return `<li><button class="row" data-card="${esc(c.id)}">
-    ${thumb(imgOf(c.id), c.name)}
+    ${thumb(imgOf(c.id) || c.image, c.name)}
     <span style="min-width:0">
       <span class="name">${esc(c.name)}</span>
       <span class="rset">${c.fair_low != null ? `Spanne ${eur(c.fair_low)} – ${eur(c.fair_high)}` : "Noch kein Fairwert"}</span>
@@ -689,6 +702,8 @@ function wire() {
   document.onclick = e => { if (!m.hidden && !m.contains(e.target)) closeMenu(); };
   $("#logout").onclick = () => db.auth.signOut();
   $("#reload").onclick = () => { closeMenu(); load(); };
+  $("#addtop").onclick = openAdd;
+  $("#addfab").onclick = openAdd;
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
     state.tab = b.dataset.tab;
     try { localStorage.setItem("ss_tab", state.tab); } catch (e) { /* egal */ }
@@ -732,6 +747,7 @@ function openSheet(html) {
 function closeSheet() {
   const el = $("#sheet");
   if (el) el.remove();
+  if (state.dirty) { state.dirty = false; render(); }
   document.body.classList.remove("lock");
 }
 
@@ -787,7 +803,14 @@ function openCard(id) {
       ${off.angefragt ? `<div class="drow"><dt>Preisvorschläge geprüft</dt><dd>${off["Betrag ermittelt"] || 0} von ${off.angefragt} <small>gezahlter Betrag ermittelt</small></dd></div>` : ""}
       <div class="drow"><dt>Laufende Treffer</dt><dd>${live.length}</dd></div>
       <div class="drow"><dt>Suchbegriff</dt><dd><small>${esc(c.search || "")}</small></dd></div>
+      ${c.must_include && c.must_include.length ? `<div class="drow"><dt>Pflicht im Titel</dt><dd><small>${esc(c.must_include.join(", "))}</small></dd></div>` : ""}
+      ${c.must_exclude && c.must_exclude.length ? `<div class="drow"><dt>Ausgeschlossen</dt><dd><small>${esc(c.must_exclude.join(", "))}</small></dd></div>` : ""}
     </dl>
+    ${c.origin === "app" ? `<div class="cardact">
+        <button class="ghost" id="toggleact">${c.active ? "Pausieren" : "Wieder aktivieren"}</button>
+        <button class="ghost danger" id="delcard">Entfernen</button>
+      </div><p class="err" id="acterr"></p>`
+      : `<p class="dnote">Diese Karte steht in der watchlist.yaml und lässt sich nur dort ändern.</p>`}
     <section class="dsec">
       <h3>Verkäufe</h3>
       ${all.length ? `<div class="chart" id="chart"></div>
@@ -797,6 +820,7 @@ function openCard(id) {
         ${all.length > used.length ? `<label class="toggle"><input type="checkbox" id="showoff" style="width:auto;display:inline;margin:0"> Ausreißer zeigen</label>` : ""}</div>
         <ul class="sales" id="slist">${used.map(s => saleLi(s, false)).join("")}</ul>` : ""}
     </section>`);
+  wireCardActions(sheet, c);
   // Ausreißer sind standardmäßig ausgeblendet, damit sie die Preisachse nicht strecken
   if (all.length) drawChart($("#chart", sheet), used.length ? used : all, c);
   const so = $("#showoff", sheet);
@@ -806,6 +830,235 @@ function openCard(id) {
     $("#lgoff", sheet).hidden = !so.checked;
     drawChart($("#chart", sheet), list, c);
   };
+}
+
+function wireCardActions(sheet, c) {
+  const tg = $("#toggleact", sheet), del = $("#delcard", sheet), err = $("#acterr", sheet);
+  if (tg) tg.onclick = async () => {
+    tg.disabled = true;
+    const { error } = await db.from("snipe_cards").update({ active: !c.active }).eq("id", c.id);
+    if (error) { err.textContent = "Ändern fehlgeschlagen: " + error.message; tg.disabled = false; return; }
+    closeSheet(); load();
+  };
+  // Entfernen in zwei Schritten (kein Browser-Dialog): erst bestätigen, dann löschen
+  if (del) del.onclick = async () => {
+    if (!del.dataset.sure) { del.dataset.sure = "1"; del.textContent = "Wirklich entfernen? Verkäufe werden mitgelöscht"; return; }
+    del.disabled = true;
+    const { error } = await db.from("snipe_cards").delete().eq("id", c.id);
+    if (error) { err.textContent = "Entfernen fehlgeschlagen: " + error.message; del.disabled = false; return; }
+    closeSheet(); load();
+  };
+}
+
+/* ---------- Karte hinzufügen: Suche bei TCGdex wie im Karten-Tracker ---------- */
+
+async function tcg(path) {
+  const res = await fetch(`${TCGDEX}/${path}`);
+  if (!res.ok) throw new Error(`TCGdex antwortet mit Status ${res.status}`);
+  return res.json();
+}
+const setsCache = {};
+function setsFor(lang) {
+  if (!setsCache[lang]) setsCache[lang] = tcg(`${lang}/sets`).catch(e => { delete setsCache[lang]; throw e; });
+  return setsCache[lang];
+}
+function setIdFromCardId(id, localId) {
+  const suffix = localId != null ? "-" + localId : null;
+  if (suffix && id.endsWith(suffix)) return id.slice(0, -suffix.length);
+  const i = id.lastIndexOf("-");
+  return i > 0 ? id.slice(0, i) : id;
+}
+const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const slug = t => norm(t).replace(/ /g, "-");
+
+// Kernname für den Titelabgleich: "Zapdos ex" → zapdos, "Dark Charizard" → charizard
+const NAME_SKIP = new Set(["ex", "v", "vmax", "vstar", "gx", "mega", "m", "dark", "light", "radiant", "shining",
+  "alolan", "galarian", "hisuian", "paldean", "team", "rockets", "brocks", "mistys", "erikas", "blaines", "sabrinas",
+  "lt", "surges", "giovannis", "kogas", "star", "break", "lv", "x", "tag", "team", "delta", "species", "prime",
+  "alola", "galar", "hisui", "paldea", "dunkles", "dunkler", "dunkle", "strahlendes", "strahlender", "glänzendes"]);
+function keyName(name) {
+  const words = norm(name).split(" ").filter(w => w && !NAME_SKIP.has(w) && !/^\d+$/.test(w));
+  return words[0] || norm(name).split(" ")[0] || "";
+}
+// Nummer, wie sie in eBay-Titeln steht: 202/165 (auch 006/102), sonst die Kennung (GG05, TG12, SWSH050)
+function numberTerms(localId, official) {
+  const L = String(localId || "").trim();
+  if (/^\d+$/.test(L) && official) {
+    const n = parseInt(L, 10), a = `${n}/${official}`, b = `${String(n).padStart(3, "0")}/${official}`;
+    return { search: a, must: a === b ? a : `${a}|${b}` };
+  }
+  return { search: L, must: L.toLowerCase() };
+}
+// Deine Auswahlkriterien von früher: nur Gen 1–2, kein Mewtu, kein 30th Celebration
+function criteriaWarnings(c) {
+  const out = [], dex = (c.dexId || []).map(Number);
+  if (dex.some(d => d > 251)) out.push("Pokémon ab Generation 3 (deine bisherige Auswahl: nur Gen 1–2)");
+  if (dex.includes(150) || /mewtwo|mewtu/i.test(c.name)) out.push("Mewtu (bisher ausgeschlossen)");
+  if (/celebration/i.test((c.set && c.set.name) || "")) out.push("Celebration-Set (bisher ausgeschlossen)");
+  return out;
+}
+
+function openAdd() {
+  const s = { lang: "en", results: [], picked: null };
+  const sheet = openSheet(`
+    <header class="sheet-head"><h2>Karte hinzufügen</h2><button class="ghost" data-close>Fertig</button></header>
+    <p class="muted dsmall" style="margin:0 0 6px">Sprache des Slabs, nach der der Scout suchen soll.</p>
+    <div class="seg" id="langseg"><button data-l="en" class="on">Englisch</button><button data-l="de">Deutsch</button></div>
+    <div class="searchrow">
+      <input id="q" type="search" placeholder="Name oder Nummer, z. B. Lapras oder 202/165" enterkeyhint="search" autocomplete="off">
+      <button id="sbtn" class="primary">Suchen</button>
+    </div>
+    <div id="res"></div>`);
+  const res = $("#res", sheet);
+
+  sheet.querySelectorAll("#langseg button").forEach(b => b.onclick = () => {
+    s.lang = b.dataset.l;
+    sheet.querySelectorAll("#langseg button").forEach(x => x.classList.toggle("on", x === b));
+    res.innerHTML = ""; s.results = []; s.picked = null;
+  });
+
+  function showResults(list, msg) {
+    s.results = list;
+    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${msg}</p>` : ""}${list.length ? `<ul class="results">${list.map(c => `<li><button class="pick" data-id="${esc(c.id)}">
+        ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'noimg'}))">` : `<span class="noimg"></span>`}
+        <span><b>${esc(c.name)}</b><small>${esc(c.setName || setIdFromCardId(c.id, c.localId))}, Nr. ${esc(c.localId)}</small></span></button></li>`).join("")}</ul>` : ""}`;
+    res.querySelectorAll(".pick").forEach(b => b.onclick = () => pick(b.dataset.id));
+  }
+
+  async function search() {
+    const raw = $("#q", sheet).value.trim();
+    const num = raw.match(/(\d+)\s*\/\s*(\d+)/);
+    if (num) return searchByNumber(num[1], Number(num[2]), raw.replace(num[0], "").trim());
+    if (raw.length < 2) return;
+    res.innerHTML = `<p class="muted">Suche läuft …</p>`;
+    try {
+      const [list, sets] = await Promise.all([
+        tcg(`${s.lang}/cards?name=${encodeURIComponent(raw)}&pagination:page=1&pagination:itemsPerPage=40`),
+        setsFor(s.lang).catch(() => [])
+      ]);
+      if (!list.length) { res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, die Nummer (z. B. 202/165) oder die andere Sprache.</p>`; return; }
+      const byId = new Map(sets.map(x => [x.id, x.name]));
+      showResults(list.map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })));
+    } catch (e) { res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`; }
+  }
+
+  // "202/165": Karte Nr. 202 aus Sets mit 165 offiziellen Karten
+  async function searchByNumber(localNum, official, nameFilter) {
+    res.innerHTML = `<p class="muted">Suche nach Nr. ${esc(localNum)}/${official} …</p>`;
+    try {
+      const sets = await setsFor(s.lang);
+      const cands = sets.filter(x => x.cardCount && Number(x.cardCount.official) === official).slice(0, 12);
+      if (!cands.length) { res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache.</p>`; return; }
+      const variants = [...new Set([localNum, localNum.replace(/^0+(?=\d)/, ""), localNum.padStart(3, "0")])];
+      const found = [];
+      for (const set of cands) {
+        for (const v of variants) {
+          try {
+            const card = await tcg(`${s.lang}/cards/${encodeURIComponent(`${set.id}-${v}`)}`);
+            if (card && card.id) { found.push({ id: card.id, name: card.name, image: card.image, localId: card.localId, setName: set.name }); break; }
+          } catch (e) { /* Schreibweise gibt es nicht */ }
+        }
+      }
+      const nf = norm(nameFilter);
+      const list = nf ? found.filter(c => norm(c.name).includes(nf)) : found;
+      if (!list.length) { res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden.</p>`; return; }
+      showResults(list);
+    } catch (e) { res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`; }
+  }
+
+  async function pick(id) {
+    res.innerHTML = `<p class="muted">Karte wird geladen …</p>`;
+    try {
+      const c = await tcg(`${s.lang}/cards/${encodeURIComponent(id)}`);
+      // Name in der anderen Sprache als Alternative (z. B. venusaur|bisaflor), Titel sind oft gemischt
+      const other = await tcg(`${s.lang === "en" ? "de" : "en"}/cards/${encodeURIComponent(id)}`).catch(() => null);
+      s.picked = c;
+      // Offizielle Setgröße nur bei reinen Zahlen (GG05, TG12 usw. haben eigene Zählungen)
+      const official = /^\d+$/.test(String(c.localId)) ? (c.set && c.set.cardCount && c.set.cardCount.official) : null;
+      const nums = numberTerms(c.localId, official);
+      const k1 = keyName(c.name), k2 = other ? keyName(other.name) : "";
+      const nameTerm = [...new Set([k1, k2].filter(Boolean))].join("|");
+      const setName = (c.set && c.set.name) || "";
+      const display = `${c.name} ${official ? nums.search : c.localId}${setName ? ` (${setName})` : ""} ${s.lang.toUpperCase()}`;
+      const searchTerm = `${c.name} ${nums.search} PSA 10`;
+      const warns = criteriaWarnings(c);
+      const imgUrl = c.image ? `${c.image}/low.webp` : null;
+      const exists = state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang);
+      res.innerHTML = `
+        ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
+        <div class="preview">
+          ${imgUrl ? `<img src="${esc(imgUrl)}" alt="">` : ""}
+          <div>
+            <h3>${esc(c.name)}</h3>
+            <p class="muted">${esc(setName)}, Nr. ${esc(c.localId)}${official ? "/" + esc(official) : ""}</p>
+            <p class="muted">${esc(c.rarity || "")}</p>
+          </div>
+        </div>
+        ${warns.length ? `<p class="critwarn" role="note"><b>Abweichung von deinen bisherigen Kriterien:</b> ${esc(warns.join("; "))}. Hinzufügen geht trotzdem.</p>` : ""}
+        ${exists ? `<p class="critwarn" role="note"><b>Schon in deiner Liste</b>${exists.active ? "" : " (pausiert)"}: ${esc(exists.name)}.</p>` : ""}
+        <div class="addform">
+          <label>Name in der Übersicht<input id="fname" value="${esc(display)}"></label>
+          <label>eBay-Suchbegriff<input id="fsearch" value="${esc(searchTerm)}">
+            <small class="hint">Damit sucht der Scout laufende Auktionen und verkaufte Exemplare.</small></label>
+          <label>Muss im Titel stehen<input id="fmust" value="${esc([nameTerm, nums.must].filter(Boolean).join(", "))}">
+            <small class="hint">Mit Komma getrennt, alle Begriffe müssen vorkommen. „a|b“ heißt a oder b. PSA 10 prüft der Scout immer selbst.</small></label>
+          <label>Ausschließen (optional)<input id="fexcl" placeholder="z. B. japanese, 1st edition">
+            <small class="hint">Andere Gradings, Sammelangebote und Proxys sind schon ausgeschlossen.</small></label>
+          <div class="two">
+            <label>Abschlag in %<input id="fdisc" type="number" min="0" max="60" step="1" value="${Math.round(DEFAULTS.discount * 100)}" inputmode="numeric"></label>
+            <label>Budget in € <input id="fcap" type="number" min="0" step="10" value="${DEFAULTS.max_total_eur}" inputmode="numeric"></label>
+          </div>
+          <button id="save" class="primary wide" style="margin-top:18px">Zum Snipe-Scout hinzufügen</button>
+          <p class="err" id="saveerr"></p>
+        </div>`;
+      const back = $("#back", sheet);
+      if (back) back.onclick = () => showResults(s.results);
+      $("#save", sheet).onclick = () => save(c, imgUrl, setName, official);
+    } catch (e) { res.innerHTML = `<p class="err">Karte konnte nicht geladen werden: ${esc(e.message)}</p>`; }
+  }
+
+  async function save(c, imgUrl, setName, official) {
+    const btn = $("#save", sheet), err = $("#saveerr", sheet);
+    const list = v => v.split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
+    const name = $("#fname", sheet).value.trim(), search = $("#fsearch", sheet).value.trim();
+    const must = list($("#fmust", sheet).value), excl = list($("#fexcl", sheet).value);
+    const disc = Number($("#fdisc", sheet).value), cap = Number($("#fcap", sheet).value);
+    if (!name || !search) { err.textContent = "Name und Suchbegriff dürfen nicht leer sein."; return; }
+    if (!/psa\s*10/i.test(search)) { err.textContent = "Der Suchbegriff sollte „PSA 10“ enthalten."; return; }
+    if (!must.length) { err.textContent = "Mindestens ein Pflichtbegriff, sonst kommen fremde Karten durch."; return; }
+    if (!(disc >= 0 && disc <= 60)) { err.textContent = "Abschlag bitte zwischen 0 und 60 %."; return; }
+    btn.disabled = true; err.textContent = "";
+    const row = {
+      id: slug(`${keyName(c.name)} ${c.localId} ${c.set ? c.set.id : ""} ${s.lang}`),
+      name, search, must_include: must, must_exclude: excl.length ? excl : null, language: s.lang,
+      discount: disc / 100, max_total_eur: cap > 0 ? cap : null, active: true, origin: "app",
+      tcgdex_id: c.id, set_name: setName || null, card_number: official ? `${c.localId}/${official}` : String(c.localId),
+      image: imgUrl
+    };
+    const { error } = await db.from("snipe_cards").insert(row);
+    if (error) {
+      btn.disabled = false;
+      if (/origin|must_include|tcgdex_id|column|row-level security/i.test(error.message)) { err.textContent = UPDATE2_MSG; return; }
+      if (/duplicate|23505/i.test(error.message + (error.code || ""))) { err.textContent = "Diese Karte ist schon in deiner Liste. Pausierte Karten aktivierst du in der Kartenansicht."; return; }
+      err.textContent = "Speichern fehlgeschlagen: " + error.message;
+      return;
+    }
+    await reloadCards();
+    s.picked = null;
+    showResults(s.results, `<b>${esc(name)}</b> ist im Snipe-Scout. Fairwert und Treffer kommen mit dem nächsten Lauf – sofort geht's über <a href="${SCOUT_ACTIONS}/workflows/comps-test.yml" target="_blank" rel="noopener">fairwert-test</a> (ca. 0,25 $ pro neue Karte).`);
+    const q = $("#q", sheet); if (q) q.select();
+  }
+
+  $("#sbtn", sheet).onclick = search;
+  $("#q", sheet).addEventListener("keydown", e => { if (e.key === "Enter") search(); });
+  $("#q", sheet).focus();
+}
+
+// Nach dem Hinzufügen nur die Kartenliste neu laden; die Seite dahinter aktualisiert sich beim Schließen
+async function reloadCards() {
+  const { data } = await db.from("snipe_cards").select("*").order("name");
+  if (data) state.cards = data;
+  state.dirty = true;
 }
 
 /* ---------- Diagramm: Verkäufe über die Zeit, Fairwert und Höchstgebot als Referenzlinien ---------- */
