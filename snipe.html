@@ -365,6 +365,7 @@ details.rgrp>p{margin:2px 0 4px}
 .thumb.ph{display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:11px;font-weight:600}
 .big{font-size:17px}
 .sale .simg{cursor:zoom-in}
+.sale .orig{align-self:center;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .cimg{display:block;width:96px;aspect-ratio:3/4;margin:4px 0 12px;padding:0;border:0;border-radius:8px;overflow:hidden;background:var(--fill);cursor:zoom-in}
 .cimg img{width:100%;height:100%;object-fit:cover;display:block}
 .price .lbl{display:block;font-weight:400;color:var(--muted);font-size:12px}
@@ -555,7 +556,7 @@ function render() {
         ${state.tab === "cards" && state.cards.some(c => !c.active) ? `<details class="more"><summary>Pausierte oder entfernte Karten (${state.cards.filter(c => !c.active).length})</summary>
           <ul class="list" style="margin-top:8px">${state.cards.filter(c => !c.active).map(cardRow).join("")}</ul></details>` : ""}
       </section>
-      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
+      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
     </div>`;
 
   wire();
@@ -642,6 +643,22 @@ document.addEventListener("click", e => {
   if (a) { e.preventDefault(); const im = a.querySelector("img"); openLightbox(a.href, im && im.currentSrc, "Angebotsfoto"); }
 });
 
+// Herkunft & Originalpreis: "238,50 $ · USA · inkl. EUSt"
+const COUNTRY = { US: "USA", GB: "UK", JP: "Japan", CA: "Kanada", AU: "Australien", HK: "Hongkong", CN: "China",
+  TW: "Taiwan", KR: "Korea", SG: "Singapur", CH: "Schweiz", DE: "DE" };
+function origPrice(s) {
+  if (s.price_orig == null || !s.currency || s.currency === "EUR") return "";
+  try { return new Intl.NumberFormat("de-DE", { style: "currency", currency: s.currency }).format(s.price_orig); }
+  catch (e) { return `${Number(s.price_orig).toFixed(2)} ${s.currency}`; }
+}
+function originText(s) {
+  const parts = [];
+  const o = origPrice(s); if (o) parts.push(o);
+  if (s.country && s.country !== "DE") parts.push(COUNTRY[s.country] || s.country);
+  if (s.import_vat) parts.push("inkl. 19 % EUSt");
+  return parts.join(" · ");
+}
+
 function saleLi(s, withCard) {
   const fmt = FORMAT[s.format] || (s.format ? s.format : "");
   const small = ebayImg(s.image, 225), big = ebayImg(s.image, 1600), link = ebayItemUrl(s.item_id, s.url);
@@ -649,7 +666,7 @@ function saleLi(s, withCard) {
     ${small ? `<a class="simg" href="${esc(big)}" target="_blank" rel="noopener" title="Foto groß ansehen"><img src="${esc(small)}" alt="Angebotsfoto" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.style.visibility='hidden'"></a>` : ""}
     <span class="sd">${esc(dateDE(s.sold_at))}${withCard ? ` · <span class="card">${esc(cardById(s.card_id).name)}</span>` : ""}</span>
     <span class="sp">${eur(s.price_eur, 2)}${s.ask_eur ? `<small>Angebot ${eur(s.ask_eur, 2)}</small>` : ""}</span>
-    <span class="st">${fmt ? `<span class="tag">${esc(fmt)}</span>` : ""}${s.used ? "" : `<span class="tag">Ausreißer</span>`}</span>
+    <span class="st">${fmt ? `<span class="tag">${esc(fmt)}</span>` : ""}${s.used ? "" : `<span class="tag">Ausreißer</span>`}${originText(s) ? `<span class="orig">${esc(originText(s))}</span>` : ""}</span>
     ${link ? `<a class="stl" href="${esc(link)}" target="_blank" rel="noopener">${esc(s.title || "Angebot öffnen")}</a>` : `<span class="stl">${esc(s.title || "")}</span>`}
   </div></li>`;
 }
@@ -836,6 +853,7 @@ function drawChart(host, sales, card) {
     const p = pts[cur];
     tip.innerHTML = `<b>${esc(eur(p.v, 2))}</b> · ${esc(dateDE(p.s.sold_at))}
       <small>${esc(FORMAT[p.s.format] || p.s.format || "")}${p.s.ask_eur ? " · Angebot " + esc(eur(p.s.ask_eur, 2)) : ""}${p.s.used ? "" : " · Ausreißer"}</small>
+      ${originText(p.s) ? `<small>${esc(originText(p.s))}</small>` : ""}
       <small>${esc((p.s.title || "").slice(0, 70))}</small>`;
     tip.style.left = `${x(p.t) / k}px`; tip.style.top = `${y(p.v) / k}px`;
     tip.hidden = false;
