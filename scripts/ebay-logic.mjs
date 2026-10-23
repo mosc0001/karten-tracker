@@ -44,7 +44,8 @@ const UNGRADED_RX = /ungraded|nicht bewertet|non gradat|non gradee|non grade|sin
 const GRADED_COND_RX = /^(graded|bewertet|gradata|gradee|calificad|gegradeerd)/;
 const GRADED_TITLE_RX = new RegExp(
   [
-    "\\b(psa|bgs|cgc|gsg|sgc|tag|ace|aog|mnt|hga|pca|gma|gg)\\s?-?\\s?\\d",
+    // "gg" nur mit Abstand: "GG05" ist eine Kartennummer (Galarian Gallery), kein Prüfdienst
+    "\\b(psa|bgs|cgc|gsg|sgc|tag|ace|aog|mnt|hga|pca|gma)\\s?-?\\s?\\d|\\bgg\\s-?\\s?\\d",
     "\\b(psa|bgs|cgc|beckett|gsg|sgc|aog|slab|slabbed|graded|gradata|gradee|bewertet|get graded)\\b",
   ].join("|")
 );
@@ -538,6 +539,8 @@ export const SET_TERMS = {
   ecard1: ["Expedition"],
   ecard2: ["Aquapolis"],
   ecard3: ["Skyridge"],
+  "swsh12.5": ["Zenith", "Zenit", "CRZ"],
+  "swsh12.5gg": ["Zenith", "Zenit", "CRZ"],
 };
 
 // Japanische Sets: englische Bezeichnung, Begriffe in eBay-Titeln, ob Kartennummern aufgedruckt sind.
@@ -614,7 +617,14 @@ export function buildQuery(card) {
 // (getestet: Haunter Fossil, 60 Treffer = 71 statt 33 Tage). Nicht für Promos und Nummern mit Buchstaben.
 export function buildNumberQuery(card) {
   if (isPromoSet(card.setName, card.setId)) return null;
-  const nums = numberVariants(card.number, card.setTotal);
+  let nums = numberVariants(card.number, card.setTotal);
+  // Nummern mit Buchstaben aus Sondersets (Galarian Gallery GG05, Trainer Gallery TG12, Radiant Collection RC5):
+  // Verkäufer schreiben sie meist allein ("GG05") oder mit Setgröße ("GG05/GG70")
+  const pm = String(card.number || "").trim().match(/^([A-Za-z]{2,3})0*(\d{1,3})$/);
+  if (!nums.length && pm && !/^(h|sv)$/i.test(pm[1])) {
+    const pre = pm[1].toUpperCase(), n = pm[2];
+    nums = [...new Set([`${pre}${n.padStart(2, "0")}`, `${pre}${n}`])];
+  }
   if (!nums.length) return null;
   return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : "", card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
