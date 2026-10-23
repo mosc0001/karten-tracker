@@ -259,7 +259,26 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .pick img,.noimg{width:44px;height:61px;object-fit:contain;border-radius:4px;flex:none}
 .noimg{background:var(--fill)}
 .pick small{display:block;color:var(--muted)}
-.shipin{width:5.2em;display:inline-block;margin:0;padding:4px 8px;text-align:right;font-size:15px}
+.shipin{width:4.6em;display:inline-block;margin:0;padding:4px 8px;text-align:right;font-size:15px}
+.discbox{margin:14px 0 6px;padding:14px 16px;border-radius:14px;background:var(--fill)}
+.discrow{display:flex;justify-content:space-between;align-items:baseline;font-weight:600}
+.discrow label{margin:0;color:inherit;font-size:15px}
+.discrow output{font-size:20px;font-variant-numeric:tabular-nums}
+#disc{-webkit-appearance:none;appearance:none;width:100%;height:28px;margin:8px 0 2px;padding:0;background:transparent}
+#disc::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(90deg,var(--accent) var(--p,0%),var(--line,rgba(120,120,128,.3)) var(--p,0%))}
+.shipin::-webkit-inner-spin-button,.shipin::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}.shipin{-moz-appearance:textfield}
+#disc::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;margin-top:-11px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3),0 0 0 .5px rgba(0,0,0,.06)}
+#disc::-moz-range-track{height:4px;border-radius:2px;background:var(--line,rgba(120,120,128,.3))}
+#disc::-moz-range-thumb{width:26px;height:26px;border:0;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+#disc::-moz-range-progress{height:4px;border-radius:2px;background:var(--accent)}
+.discbox p{margin:4px 0 0}
+.bidtab{width:100%;border-collapse:collapse;margin:8px 0 4px;font-size:15px}
+.bidtab th,.bidtab td{padding:9px 4px;border-top:.5px solid var(--line,rgba(120,120,128,.3));text-align:left;vertical-align:middle;font-weight:400}
+.bidtab thead th{border-top:0;color:var(--muted);font-size:12px;padding-top:0}
+.bidtab th small{display:block;color:var(--muted);font-size:12px}
+.bidtab .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bidtab .big{font-size:18px;font-weight:600}
+.bidtab tr.mine th{font-weight:600}
 .sethits h4,.reshead{font-size:13px;font-weight:600;color:var(--muted);margin:14px 0 2px}
 .setpick .seticon{width:44px;height:44px;flex:none;border-radius:10px;background:var(--fill);display:flex;align-items:center;justify-content:center}
 .setpick .seticon img{width:28px;height:28px;object-fit:contain}
@@ -454,6 +473,16 @@ function usBid(c) {
   if (c.max_total_eur) total = Math.min(total, Number(c.max_total_eur));
   return Math.max(0, Math.floor(total / 1.19 - shipUS));
 }
+// EU-Versand (geschätzt, änderbar): Mehrwertsteuer ist wie bei deutschen Verkäufern im Preis enthalten
+const SHIP_EU_DEFAULT = 15;
+let shipEU = SHIP_EU_DEFAULT;
+try { const v = parseFloat(localStorage.getItem("snipe_ship_eu")); if (v >= 0 && v < 200) shipEU = v; } catch (e) { /* Standard */ }
+function euBid(c) {
+  if (c.fair_eur == null) return null;
+  let v = Number(c.fair_eur) * (1 - Number(c.discount || 0)) - shipEU;
+  if (c.max_total_eur) v = Math.min(v, Number(c.max_total_eur) - shipEU);
+  return Math.max(0, Math.floor(v));
+}
 function deBid(c) {
   if (c.fair_eur == null) return null;
   let v = Number(c.fair_eur) * (1 - Number(c.discount || 0)) - shipDE;
@@ -599,7 +628,7 @@ function render() {
           <ul class="list" style="margin-top:8px">${state.cards.filter(c => !c.active).map(cardRow).join("")}</ul></details>` : ""}
       </section>
       <button id="addfab" class="primary fab">+ Karte</button>
-      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. „DE“ gilt für Verkäufer in Deutschland: Mehrwertsteuer ist im Preis enthalten, es kommt nur der Inlandsversand dazu (Standard ${eur(SHIP_DE_DEFAULT, 2)}, in der Kartenansicht änderbar). „EU“ ist der Richtwert des Scouts mit dessen Versandschätzung. „US“ gilt für Verkäufer in den USA: Auf Gebot und Versand kommen 19 % Einfuhrumsatzsteuer (Standard-Versand ${eur(SHIP_US_DEFAULT)}, änderbar; möglicher Zoll über 150 € nicht eingerechnet). Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
+      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. „DE“ gilt für Verkäufer in Deutschland: Mehrwertsteuer ist im Preis enthalten, es kommt nur der Inlandsversand dazu (Standard ${eur(SHIP_DE_DEFAULT, 2)}, in der Kartenansicht änderbar). „EU“ rechnet genauso mit dem EU-Versand (Standard ${eur(SHIP_EU_DEFAULT)}). Abschlag und Versandwerte stellst du in der Kartenansicht ein. „US“ gilt für Verkäufer in den USA: Auf Gebot und Versand kommen 19 % Einfuhrumsatzsteuer (Standard-Versand ${eur(SHIP_US_DEFAULT)}, änderbar; möglicher Zoll über 150 € nicht eingerechnet). Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
     </div>`;
 
   wire();
@@ -633,7 +662,7 @@ function cardRow(c) {
         <span class="tag">−${Math.round(Number(c.discount || 0) * 100)} %</span>
         ${state.cands.some(x => x.card_id === c.id && new Date(x.end_at) > Date.now()) ? `<span class="tag hot">Treffer</span>` : ""}</span>
     </span>
-    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>max. ${deBid(c) != null ? `${eur(deBid(c))} DE · ` : ""}${eur(c.max_bid_eur)} EU${usBid(c) != null ? ` · ${eur(usBid(c))} US` : ""}</small></span>
+    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>${deBid(c) != null ? `max. ${eur(deBid(c))} DE · ${eur(euBid(c))} EU · ${eur(usBid(c))} US` : "max. –"}</small></span>
   </button></li>`;
 }
 
@@ -826,14 +855,28 @@ function openCard(id) {
     <p class="dprice">${c.fair_eur != null ? eur(c.fair_eur) : "–"}</p>
     <p class="dsmall muted" style="margin:0 0 10px">Fairwert PSA 10 · ${c.fair_n ? `Median aus ${c.fair_n} Verkäufen` : "noch zu wenige Verkäufe"}${c.comps_source ? " · " + esc(c.comps_source) : ""} · Stand ${esc(ago(c.comps_at))}</p>
     <dl class="dstats">
-      <div class="drow mine"><dt>Höchstgebot bei Versand aus Deutschland</dt><dd id="debid">${deBid(c) != null ? eur(deBid(c)) : "–"} <small>inkl. MwSt.</small></dd></div>
-      <div class="drow"><dt>Inlandsversand (geschätzt)</dt><dd><input id="shipde" class="shipin" type="number" min="0" max="99" step="0.5" value="${shipDE}" inputmode="decimal" aria-label="Inlandsversand in Euro"> €</dd></div>
-      <div class="drow"><dt>Höchstgebot bei EU-Versand</dt><dd>${eur(c.max_bid_eur)} <small>Richtwert des Scouts</small></dd></div>
-      <div class="drow"><dt>Höchstgebot bei Versand aus den USA</dt><dd id="usbid">${usBid(c) != null ? eur(usBid(c)) : "–"} <small>Gebot, zzgl. 19 % EUSt</small></dd></div>
-      <div class="drow"><dt>US-Versand (geschätzt)</dt><dd><input id="shipus" class="shipin" type="number" min="0" max="199" step="1" value="${shipUS}" inputmode="decimal" aria-label="Versand aus den USA in Euro"> €</dd></div>
-      ${usBid(c) != null && usBid(c) * 1.19 > 150 ? `<p class="dsmall muted" style="margin:4px 0 0">Über 150 € Warenwert kann bei US-Sendungen zusätzlich Zoll anfallen, der hier nicht eingerechnet ist.</p>` : ""}
+    </dl>
+    <div class="discbox">
+      <div class="discrow"><label for="disc">Abschlag</label><output id="discout">${Math.round(Number(c.discount || 0) * 100)} %</output></div>
+      <input id="disc" type="range" min="0" max="50" step="1" value="${Math.round(Number(c.discount || 0) * 100)}" aria-label="Abschlag in Prozent">
+      <p class="dsmall muted" id="discnote">${c.origin === "app" ? "Wird gespeichert und gilt ab dem nächsten Scout-Lauf auch für die Treffer." : "Karte aus der watchlist.yaml: nur Vorschau, gespeichert wird dort."}</p>
+    </div>
+    <table class="bidtab">
+      <thead><tr><th scope="col">Verkäufer aus</th><th scope="col" class="num">Höchstgebot</th><th scope="col" class="num">Versand</th></tr></thead>
+      <tbody>
+        <tr class="mine"><th scope="row">Deutschland<small>inkl. MwSt.</small></th><td class="num big" id="bid-de">–</td>
+          <td class="num"><input id="shipde" class="shipin" type="number" min="0" max="99" step="0.5" value="${shipDE}" inputmode="decimal" aria-label="Inlandsversand in Euro"> €</td></tr>
+        <tr><th scope="row">EU<small>inkl. MwSt.</small></th><td class="num big" id="bid-eu">–</td>
+          <td class="num"><input id="shipeu" class="shipin" type="number" min="0" max="199" step="0.5" value="${shipEU}" inputmode="decimal" aria-label="EU-Versand in Euro"> €</td></tr>
+        <tr><th scope="row">USA<small>Gebot, zzgl. 19 % EUSt</small></th><td class="num big" id="bid-us">–</td>
+          <td class="num"><input id="shipus" class="shipin" type="number" min="0" max="199" step="1" value="${shipUS}" inputmode="decimal" aria-label="Versand aus den USA in Euro"> €</td></tr>
+      </tbody>
+    </table>
+    <p class="dsmall muted" id="zollnote" hidden>Über 150 € Warenwert kann bei US-Sendungen zusätzlich Zoll anfallen, der hier nicht eingerechnet ist.</p>
+    <p class="dsmall muted">Versandwerte sind Schätzungen und gelten für alle Karten. Höchstgebot + Versand bleibt unter Fairwert minus Abschlag und unter deinem Budget.</p>
+    <dl class="dstats">
       <div class="drow"><dt>Spanne</dt><dd>${c.fair_low != null ? `${eur(c.fair_low)} – ${eur(c.fair_high)}` : "–"}</dd></div>
-      <div class="drow"><dt>Sicherheitsabschlag</dt><dd>${Math.round(Number(c.discount || 0) * 100)} %</dd></div>
+      <div class="drow"><dt>Richtwert des Scouts (EU)</dt><dd>${eur(c.max_bid_eur)} <small>beim letzten Lauf</small></dd></div>
       <div class="drow"><dt>Budgetgrenze inkl. Versand</dt><dd>${c.max_total_eur ? eur(c.max_total_eur) : "keine"}</dd></div>
       ${off.angefragt ? `<div class="drow"><dt>Preisvorschläge geprüft</dt><dd>${off["Betrag ermittelt"] || 0} von ${off.angefragt} <small>gezahlter Betrag ermittelt</small></dd></div>` : ""}
       <div class="drow"><dt>Laufende Treffer</dt><dd>${live.length}</dd></div>
@@ -855,39 +898,70 @@ function openCard(id) {
         ${all.length > used.length ? `<label class="toggle"><input type="checkbox" id="showoff" style="width:auto;display:inline;margin:0"> Ausreißer zeigen</label>` : ""}</div>
         <ul class="sales" id="slist">${used.map(s => saleLi(s, false)).join("")}</ul>` : ""}
     </section>`);
-  wireCardActions(sheet, c);
   // Ausreißer sind standardmäßig ausgeblendet, damit sie die Preisachse nicht strecken
-  if (all.length) drawChart($("#chart", sheet), used.length ? used : all, c);
+  let chartList = used.length ? used : all;
+  const redraw = () => { if (all.length) drawChart($("#chart", sheet), chartList, { ...c, max_bid_eur: deBid(c) }); };
+  wireCardActions(sheet, c, redraw);
+  redraw();
   const so = $("#showoff", sheet);
   if (so) so.onchange = () => {
-    const list = so.checked ? all : used;
-    $("#slist", sheet).innerHTML = list.map(s => saleLi(s, false)).join("");
+    chartList = so.checked ? all : used;
+    $("#slist", sheet).innerHTML = chartList.map(s => saleLi(s, false)).join("");
     $("#lgoff", sheet).hidden = !so.checked;
-    drawChart($("#chart", sheet), list, c);
+    redraw();
   };
 }
 
-function wireCardActions(sheet, c) {
-  const sd = $("#shipde", sheet);
-  if (sd) sd.oninput = () => {
-    const v = parseFloat(String(sd.value).replace(",", "."));
-    if (!(v >= 0 && v < 100)) return;
-    shipDE = v;
-    try { localStorage.setItem("snipe_ship_de", String(v)); } catch (e) { /* nur für diese Sitzung */ }
-    const b = deBid(c);
-    $("#debid", sheet).innerHTML = `${b != null ? eur(b) : "–"} <small>inkl. MwSt.</small>`;
-    state.dirty = true; // Liste zeigt den Wert ebenfalls
+function wireCardActions(sheet, c, redraw) {
+  // Alle drei Höchstgebote sofort neu rechnen (Regler, Versandfelder)
+  const paint = () => {
+    const show = (id, v) => { const el = $(id, sheet); if (el) el.textContent = v != null ? eur(v) : "–"; };
+    show("#bid-de", deBid(c)); show("#bid-eu", euBid(c)); show("#bid-us", usBid(c));
+    const u = usBid(c), zn = $("#zollnote", sheet);
+    if (zn) zn.hidden = !(u != null && u * 1.19 > 150);
+    if (redraw) redraw();
+    state.dirty = true; // die Liste dahinter zeigt dieselben Werte
   };
-  const su = $("#shipus", sheet);
-  if (su) su.oninput = () => {
-    const v = parseFloat(String(su.value).replace(",", "."));
-    if (!(v >= 0 && v < 200)) return;
-    shipUS = v;
-    try { localStorage.setItem("snipe_ship_us", String(v)); } catch (e) { /* nur für diese Sitzung */ }
-    const b = usBid(c);
-    $("#usbid", sheet).innerHTML = `${b != null ? eur(b) : "–"} <small>Gebot, zzgl. 19 % EUSt</small>`;
-    state.dirty = true;
+  const shipField = (sel, key, max, setter) => {
+    const el = $(sel, sheet);
+    if (!el) return;
+    el.oninput = () => {
+      const v = parseFloat(String(el.value).replace(",", "."));
+      if (!(v >= 0 && v < max)) return;
+      setter(v);
+      try { localStorage.setItem(key, String(v)); } catch (e) { /* nur für diese Sitzung */ }
+      paint();
+    };
   };
+  shipField("#shipde", "snipe_ship_de", 100, v => { shipDE = v; });
+  shipField("#shipeu", "snipe_ship_eu", 200, v => { shipEU = v; });
+  shipField("#shipus", "snipe_ship_us", 200, v => { shipUS = v; });
+  // Abschlag: sofort rechnen, kurz nach dem Loslassen speichern (nur Karten aus der App)
+  const disc = $("#disc", sheet), out = $("#discout", sheet), note = $("#discnote", sheet);
+  let saveTimer = 0;
+  const fill = () => disc && disc.style.setProperty("--p", `${(Number(disc.value) / Number(disc.max)) * 100}%`);
+  fill();
+  if (disc) disc.oninput = () => {
+    fill();
+    const v = Number(disc.value) / 100;
+    c.discount = v;
+    out.textContent = `${disc.value} %`;
+    paint();
+    if (c.origin !== "app") return;
+    clearTimeout(saveTimer);
+    note.textContent = "Wird gespeichert …";
+    saveTimer = setTimeout(async () => {
+      const { error } = await db.from("snipe_cards").update({ discount: v }).eq("id", c.id);
+      if (error) {
+        note.textContent = /permission|denied|policy|security/i.test(error.message)
+          ? "Nicht gespeichert: Bitte snipe-update-abschlag.sql in Supabase ausführen. Bis dahin nur Vorschau."
+          : "Nicht gespeichert: " + error.message;
+        return;
+      }
+      note.textContent = "Gespeichert. Gilt ab dem nächsten Scout-Lauf auch für die Treffer.";
+    }, 600);
+  };
+  paint();
   const tg = $("#toggleact", sheet), del = $("#delcard", sheet), err = $("#acterr", sheet);
   if (tg) tg.onclick = async () => {
     tg.disabled = true;
