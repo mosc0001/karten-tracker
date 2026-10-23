@@ -259,6 +259,11 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .pick img,.noimg{width:44px;height:61px;object-fit:contain;border-radius:4px;flex:none}
 .noimg{background:var(--fill)}
 .pick small{display:block;color:var(--muted)}
+.ctop{display:flex;gap:18px;align-items:center;margin:2px 0 4px}
+.cart{flex:none;display:block;width:118px;aspect-ratio:63/88;border-radius:9px;overflow:hidden;background:var(--fill);box-shadow:0 10px 26px rgba(0,0,0,.35);cursor:zoom-in}
+.cart img{width:100%;height:100%;object-fit:contain;display:block}
+.cart.photo img{object-fit:cover}
+@media (min-width:600px){.cart{width:150px}}
 .shipin{width:4.6em;display:inline-block;margin:0;padding:4px 8px;text-align:right;font-size:15px}
 .discbox{margin:14px 0 6px;padding:14px 16px;border-radius:14px;background:var(--fill)}
 .discrow{display:flex;justify-content:space-between;align-items:baseline;font-weight:600}
@@ -711,8 +716,8 @@ function closeLightbox() {
 }
 document.addEventListener("click", e => {
   if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  const a = e.target.closest("a.simg, a.cimg");
-  if (a) { e.preventDefault(); const im = a.querySelector("img"); openLightbox(a.href, im && im.currentSrc, "Angebotsfoto"); }
+  const a = e.target.closest("a.simg, a.cimg, a.cart");
+  if (a) { e.preventDefault(); const im = a.querySelector("img"); openLightbox(a.href, im && im.currentSrc, a.classList.contains("cart") ? "Kartenbild" : "Angebotsfoto"); }
 });
 
 // Herkunft & Originalpreis: "238,50 $ · USA · inkl. EUSt"
@@ -850,10 +855,23 @@ function openCard(id) {
   const st = c.comps_stats || {};
   const off = st.offer_details || {};
   const live = state.cands.filter(x => x.card_id === id && new Date(x.end_at) > Date.now());
+  // Kartenbild: gespeichertes Bild (TCGdex oder eigener Link), sonst das Foto des neuesten passenden Verkaufs
+  let art = null;
+  if (c.image) art = { small: c.image, big: c.image.replace(/\/low\.(webp|png|jpg)$/, "/high.$1") };
+  else {
+    const withImg = [...used, ...all].find(x => ebayImg(x.image, 500));
+    if (withImg) art = { small: ebayImg(withImg.image, 500), big: ebayImg(withImg.image, 1600), photo: true };
+  }
   const sheet = openSheet(`
     <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
-    <p class="dprice">${c.fair_eur != null ? eur(c.fair_eur) : "–"}</p>
-    <p class="dsmall muted" style="margin:0 0 10px">Fairwert PSA 10 · ${c.fair_n ? `Median aus ${c.fair_n} Verkäufen` : "noch zu wenige Verkäufe"}${c.comps_source ? " · " + esc(c.comps_source) : ""} · Stand ${esc(ago(c.comps_at))}</p>
+    <div class="ctop">
+      ${art ? `<a class="cart${art.photo ? " photo" : ""}" href="${esc(art.big)}" target="_blank" rel="noopener" title="Bild groß ansehen"><img src="${esc(art.small)}" alt="${esc(c.name)}" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></a>` : ""}
+      <div>
+        <p class="dprice">${c.fair_eur != null ? eur(c.fair_eur) : "–"}</p>
+        <p class="dsmall muted" style="margin:0 0 10px">Fairwert PSA 10 · ${c.fair_n ? `Median aus ${c.fair_n} Verkäufen` : "noch zu wenige Verkäufe"}${c.comps_source ? " · " + esc(c.comps_source) : ""} · Stand ${esc(ago(c.comps_at))}</p>
+        ${art && art.photo ? `<p class="dsmall muted" style="margin:0">Bild: Foto aus einem Verkauf</p>` : ""}
+      </div>
+    </div>
     <dl class="dstats">
     </dl>
     <div class="discbox">
