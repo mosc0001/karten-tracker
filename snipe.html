@@ -460,6 +460,11 @@ const SUPABASE_KEY = "sb_publishable_L4T61xqNhqn9QyOYW_IGPg_I70TkeeL";
 const SCOUT_ACTIONS = "https://github.com/mosc0001/snipe-scout/actions";
 const TCGDEX = "https://api.tcgdex.net/v2";
 const DEFAULTS = { discount: 0.15, max_total_eur: 400 };   // wie in watchlist.yaml
+// Reverse Holos mit Ball-Muster (seit Pokémon 151): eigene Variante mit eigenem Fairwert
+const BALLS = {
+  pokeball: { label: "Poké Ball", search: "Poke Ball", must: "poke ball|pokeball|poké ball" },
+  masterball: { label: "Master Ball", search: "Master Ball", must: "master ball|masterball" },
+};
 // Versand innerhalb Deutschlands (versichertes Paket für einen Slab), änderbar in der Kartenansicht, gilt für alle Karten
 const SHIP_DE_DEFAULT = 6.5;
 let shipDE = SHIP_DE_DEFAULT;
@@ -1255,6 +1260,8 @@ function openAdd() {
       const searchTerm = `${c.name} ${nums.search} PSA 10`;
       const warns = criteriaWarnings(c);
       const imgUrl = imgOverride || (c.image ? `${c.image}/low.webp` : null);
+      // Ball-Muster laut TCGdex (variants_detailed, Folie "pokeball"/"masterball")
+      const balls = [...new Set((c.variants_detailed || []).map(x => x && x.foil).filter(f => BALLS[f]))];
       const exists = c.id ? state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang) : null;
       res.innerHTML = `
         ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
@@ -1269,6 +1276,10 @@ function openAdd() {
         ${warns.length ? `<p class="critwarn" role="note"><b>Abweichung von deinen bisherigen Kriterien:</b> ${esc(warns.join("; "))}. Hinzufügen geht trotzdem.</p>` : ""}
         ${exists ? `<p class="critwarn" role="note"><b>Schon in deiner Liste</b>${exists.active ? "" : " (pausiert)"}: ${esc(exists.name)}.</p>` : ""}
         <div class="addform">
+          <label>Variante<select id="fvar">
+              <option value="">Standard${balls.length ? " (ohne Ball-Muster)" : ""}</option>
+              ${Object.entries(BALLS).map(([v, b]) => `<option value="${v}">${b.label}${balls.includes(v) ? " (bei dieser Karte bekannt)" : ""}</option>`).join("")}
+            </select><small class="hint">${balls.length ? "Diese Karte gibt es auch mit Poké-Ball- oder Master-Ball-Muster (Reverse Holo). Die Varianten werden getrennt gehandelt." : "Poké Ball / Master Ball nur bei Sets mit Ball-Muster, z. B. 151, Prismatische Entwicklungen, Schwarzer Blitz / Weiße Flamme."}</small></label>
           <label>Name in der Übersicht<input id="fname" value="${esc(display)}"></label>
           <label>eBay-Suchbegriff<input id="fsearch" value="${esc(searchTerm)}">
             <small class="hint">Damit sucht der Scout laufende Auktionen und verkaufte Exemplare.</small></label>
@@ -1285,11 +1296,25 @@ function openAdd() {
         </div>`;
       const back = $("#back", sheet);
       if (back) back.onclick = () => showResults(s.results);
-      $("#save", sheet).onclick = () => save(c, imgUrl, setName, official);
+      // Variante wählen: Suchbegriff, Pflicht- und Ausschlussbegriffe passend vorbelegen
+      const base = { name: display, search: searchTerm, must: [nameTerm, nums.must].filter(Boolean).join(", ") };
+      const ALLBALL = "master ball, masterball, poke ball, pokeball, poké ball";
+      const applyVar = () => {
+        const v = $("#fvar", sheet).value, b = BALLS[v];
+        $("#fname", sheet).value = b ? `${base.name} ${b.label}` : base.name;
+        $("#fsearch", sheet).value = b ? base.search.replace(/\s*PSA 10$/i, ` ${b.search} PSA 10`) : base.search;
+        $("#fmust", sheet).value = b ? `${base.must}, ${b.must}` : base.must;
+        const ex = $("#fexcl", sheet);
+        // Standard in einem Set mit Ball-Mustern: die teureren Varianten ausschließen; Ball-Variante: die andere ausschließen
+        ex.value = !b ? (balls.length ? ALLBALL : "") : v === "pokeball" ? "master ball, masterball" : "poke ball, pokeball, poké ball";
+      };
+      $("#fvar", sheet).onchange = applyVar;
+      if (balls.length) applyVar();
+      $("#save", sheet).onclick = () => save(c, imgUrl, setName, official, $("#fvar", sheet).value || null);
     }
   }
 
-  async function save(c, imgUrl, setName, official) {
+  async function save(c, imgUrl, setName, official, variant) {
     const btn = $("#save", sheet), err = $("#saveerr", sheet);
     const list = v => v.split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
     const name = $("#fname", sheet).value.trim(), search = $("#fsearch", sheet).value.trim();
@@ -1301,7 +1326,7 @@ function openAdd() {
     if (!(disc >= 0 && disc <= 60)) { err.textContent = "Abschlag bitte zwischen 0 und 60 %."; return; }
     btn.disabled = true; err.textContent = "";
     const row = {
-      id: slug(`${keyName(c.name)} ${c.localId} ${c.set ? c.set.id : ""} ${s.lang}`),
+      id: slug(`${keyName(c.name)} ${c.localId} ${c.set ? c.set.id : ""} ${s.lang}${variant ? " " + variant : ""}`),
       name, search, must_include: must, must_exclude: excl.length ? excl : null, language: s.lang,
       discount: disc / 100, max_total_eur: cap > 0 ? cap : null, active: true, origin: "app",
       tcgdex_id: c.id, set_name: setName || null, card_number: official ? `${c.localId}/${official}` : String(c.localId),
