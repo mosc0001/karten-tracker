@@ -309,6 +309,11 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .pick img,.noimg{width:44px;height:61px;object-fit:contain;border-radius:4px;flex:none}
 .noimg{background:var(--fill)}
 .pick small{display:block;color:var(--muted)}
+.sethits h4,.reshead{font-size:13px;font-weight:600;color:var(--muted);margin:14px 0 2px;text-transform:none}
+.setpick .seticon{width:44px;height:44px;flex:none;border-radius:10px;background:var(--fill);display:flex;align-items:center;justify-content:center}
+.setpick .seticon img{width:28px;height:28px;object-fit:contain}
+.setpick>span:nth-child(2){flex:1;min-width:0}
+.chevr{color:var(--faint);font-size:22px;padding:0 6px}
 .preview{display:flex;gap:16px;margin-top:12px}
 .preview img{width:104px;height:auto;border-radius:7px;align-self:flex-start;box-shadow:var(--poster-shadow)}
 .preview p{margin:2px 0}
@@ -2423,7 +2428,7 @@ function openAdd() {
     </div>
     <div class="seg" id="langseg"><button data-l="DE" class="on">Deutsch</button><button data-l="EN">Englisch</button><button data-l="JP">Japanisch</button></div>
     <div class="searchrow">
-      <input id="q" type="search" placeholder="Name oder Nummer, z. B. Mewtu oder 6/105" enterkeyhint="search" autocomplete="off">
+      <input id="q" type="search" placeholder="Name, Set oder Nummer, z. B. Mewtu, Neo Genesis oder 6/105" enterkeyhint="search" autocomplete="off">
       <button id="sbtn" class="primary">Suchen</button>
     </div>
     <p class="muted dsmall" id="jphint" hidden>Japanisch: Suche mit dem deutschen oder englischen Namen (z. B. Glurak oder Charizard), mit dem japanischen Namen oder bei neueren Karten mit der Nummer (z. B. 006/165). Alte Karten bis Neo haben keine Nummer, dort hilft das Set in der Trefferliste.</p>
@@ -2445,10 +2450,14 @@ function openAdd() {
     s.results = [];
   });
 
-  function showResults(list, msg) {
+  // setHits: passende Sets zur Eingabe, oberhalb der Karten; ein Tipp zeigt alle Karten des Sets
+  function showResults(list, msg, setHits = []) {
     s.results = list;
     const yr = id => state.setYears[id] ? ` (${state.setYears[id]})` : "";
-    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${esc(msg)}</p>` : ""}${list.length ? `<ul class="results">${list.map(c => {
+    const setsHtml = setHits.length ? `<div class="sethits"><h4>Sets</h4><ul class="results">${setHits.map(x => `<li><button class="pick setpick" data-set="${esc(x.id)}">
+        <span class="seticon" aria-hidden="true">${x.symbol ? `<img src="${esc(x.symbol)}.png" alt="" loading="lazy" onerror="this.remove()">` : ""}</span>
+        <span><b>${esc(x.label)}</b><small>${x.count ? `${x.count} Karten` : "Set"}${yr(x.id)} · alle Karten anzeigen</small></span><span class="chevr" aria-hidden="true">›</span></button></li>`).join("")}</ul></div>` : "";
+    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${esc(msg)}</p>` : ""}${setsHtml}${list.length ? `${setHits.length ? "<h4 class=\"reshead\">Karten</h4>" : ""}<ul class="results">${list.map(c => {
       const sid = setIdFromCardId(c.id, c.localId);
       const setLbl = isJP() ? jpSetLabel(sid, c.setName) : (c.setName || sid);
       const nr = isJP() && jpNoNumber(sid) ? "" : `, Nr. ${esc(c.localId)}`;
@@ -2456,7 +2465,42 @@ function openAdd() {
         ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" data-tid="${esc(c.id || "")}" onerror="imgFallback(this)">` : `<span class="noimg"></span>`}
         <span><b>${esc(c.name)}</b><small>${esc(setLbl)}${yr(sid)}${nr}</small></span></button></li>`;
     }).join("")}</ul>` : ""}`;
-    res.querySelectorAll(".pick").forEach(b => b.onclick = () => pick(b.dataset.id));
+    res.querySelectorAll(".pick:not(.setpick)").forEach(b => b.onclick = () => pick(b.dataset.id));
+    res.querySelectorAll(".setpick").forEach(b => b.onclick = () => openSet(b.dataset.set, setHits.find(x => x.id === b.dataset.set)));
+  }
+
+  // Sets, deren Name zur Eingabe passt (bei Deutsch auch über den englischen Setnamen, z. B. "Crown Zenith")
+  function matchSets(sets, alias, q) {
+    const nq = norm(q).trim();
+    if (nq.length < 3) return [];
+    const aliasName = new Map((alias || []).map(x => [x.id, x.name]));
+    const words = nq.split(/\s+/);
+    const hit = x => {
+      const label = isJP() ? jpSetLabel(x.id, x.name) : x.name;
+      const hay = norm(`${label} ${aliasName.get(x.id) || ""} ${x.name} ${x.id}`);
+      return words.every(w => hay.includes(w));
+    };
+    return sets.filter(hit).reverse().slice(0, 12).map(x => ({
+      id: x.id, label: isJP() ? jpSetLabel(x.id, x.name) : x.name, symbol: x.symbol || null,
+      count: x.cardCount && (x.cardCount.total || x.cardCount.official) || null,
+    }));
+  }
+
+  // Alle Karten eines Sets, nach Nummer sortiert (Buchstaben-Nummern wie GG05 hinten)
+  async function openSet(id, info) {
+    res.innerHTML = `<p class="muted">Set wird geladen …</p>`;
+    try {
+      const d = await tcg(`${lang()}/sets/${encodeURIComponent(id)}`);
+      const cards = (d && d.cards) || [];
+      if (!cards.length) { res.innerHTML = `<p class="muted">Zu diesem Set liefert TCGdex keine Kartenliste.</p>`; return; }
+      const key = x => { const m = String(x.localId).match(/^([A-Za-z]*)(\d+)(.*)$/); return m ? [m[1] ? 1 : 0, m[1], Number(m[2]), m[3]] : [2, String(x.localId), 0, ""]; };
+      cards.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1].localeCompare(y[1]) || x[2] - y[2] || x[3].localeCompare(y[3]); });
+      const label = (info && info.label) || (isJP() ? jpSetLabel(id, d.name) : d.name);
+      showResults(cards.map(c => ({ ...c, setName: d.name })), `${label}: ${cards.length} Karten. Tippe die gewünschte an.`);
+      res.scrollIntoView({ block: "start", behavior: "smooth" });
+    } catch (e) {
+      res.innerHTML = `<p class="err">Set konnte nicht geladen werden: ${esc(e.message)}</p>`;
+    }
   }
 
   async function search() {
@@ -2473,16 +2517,19 @@ function openAdd() {
     res.innerHTML = `<p class="muted">Suche läuft …</p>`;
     if (isJP()) return searchJapanese(raw);
     try {
-      let [list, sets] = await Promise.all([
-        tcg(`${lang()}/cards?name=${encodeURIComponent(nameQ)}&pagination:page=1&pagination:itemsPerPage=250`),
-        setsFor(lang()).catch(() => [])
+      let [list, sets, enSets] = await Promise.all([
+        tcg(`${lang()}/cards?name=${encodeURIComponent(nameQ)}&pagination:page=1&pagination:itemsPerPage=250`).catch(() => []),
+        setsFor(lang()).catch(() => []),
+        lang() === "en" ? Promise.resolve(null) : setsFor("en").catch(() => [])
       ]);
       if (numQ) {
         const hit = list.filter(c => numKey(c.localId) === numKey(numQ));
         if (hit.length) list = hit;
       }
-      if (!list.length) {
-        res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, die Kartennummer (z. B. 6/105) oder die andere Sprache.</p>`;
+      const setHits = numQ ? [] : matchSets(sets, enSets, raw);
+      if (!list.length && setHits.length === 1) return openSet(setHits[0].id, setHits[0]);
+      if (!list.length && !setHits.length) {
+        res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, den Setnamen, die Kartennummer (z. B. 6/105) oder die andere Sprache.</p>`;
         return;
       }
       const byId = new Map(sets.map(x => [x.id, x.name]));
@@ -2490,7 +2537,7 @@ function openAdd() {
       const order = new Map(sets.map((x, i) => [x.id, i]));
       list.sort((a, b) => (order.get(setIdFromCardId(b.id, b.localId)) ?? -1) - (order.get(setIdFromCardId(a.id, a.localId)) ?? -1));
       showResults(list.slice(0, 120).map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })),
-        list.length > 120 ? `${list.length} Karten gefunden, die neuesten 120. Mit Nummer geht es schneller, z. B. „${nameQ} GG05“ oder „GG05/GG70“.` : "");
+        list.length > 120 ? `${list.length} Karten gefunden, die neuesten 120. Mit Nummer geht es schneller, z. B. „${nameQ} GG05“ oder „GG05/GG70“.` : "", setHits);
     } catch (e) {
       res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
     }
@@ -2523,6 +2570,9 @@ function openAdd() {
       const byDex = await Promise.all([...dex].slice(0, 3).map(n => tcg(`ja/dex-ids/${n}`).then(r => (r && r.cards) || []).catch(() => [])));
       const seen = new Set(), list = [];
       for (const c of [...ja, ...byDex.flat()]) if (c && c.id && !seen.has(c.id)) { seen.add(c.id); list.push(c); }
+      const setHits = matchSets(sets, null, raw);
+      if (!list.length && setHits.length === 1) return openSet(setHits[0].id, setHits[0]);
+      if (!list.length && setHits.length) return showResults([], "", setHits);
       if (!list.length) {
         res.innerHTML = `<p class="muted">Keine japanische Karte gefunden. Probiere den englischen Namen, die Nummer (z. B. 006/165) oder den Namen in Katakana. Trainer- und Energiekarten findet die Namenssuche nur japanisch geschrieben.</p>`;
         return;
@@ -2532,7 +2582,7 @@ function openAdd() {
       const setName = new Map(sets.map(x => [x.id, x.name]));
       list.sort((a, b) => (order.get(setIdFromCardId(a.id, a.localId)) ?? 1e6) - (order.get(setIdFromCardId(b.id, b.localId)) ?? 1e6));
       showResults(list.slice(0, 80).map(c => ({ ...c, setName: setName.get(setIdFromCardId(c.id, c.localId)) })),
-        list.length > 80 ? `${list.length} Karten gefunden, die ersten 80 nach Erscheinen. Grenze mit einem genaueren Namen oder der Nummer ein.` : "");
+        list.length > 80 ? `${list.length} Karten gefunden, die ersten 80 nach Erscheinen. Grenze mit einem genaueren Namen oder der Nummer ein.` : "", setHits);
     } catch (e) {
       res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
     }
