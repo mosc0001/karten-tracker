@@ -2491,6 +2491,27 @@ function openAdd() {
     }));
   }
 
+
+  // "Lapras Crown Zenith" oder "Crown Zenith Lapras": Eingabe in Kartenname und Set aufteilen, alle Aufteilungen
+  // durchprobieren (längster Name zuerst) und nur Karten aus den passenden Sets zeigen
+  async function nameInSet(q, sets, alias) {
+    const w = q.trim().split(/\s+/);
+    if (w.length < 2) return null;
+    const splits = [];
+    for (let k = w.length - 1; k >= 1; k--) {
+      splits.push([w.slice(0, k).join(" "), w.slice(k).join(" ")]); // Name zuerst
+      splits.push([w.slice(w.length - k).join(" "), w.slice(0, w.length - k).join(" ")]); // Set zuerst
+    }
+    for (const [namePart, setPart] of splits) {
+      const sh = matchSets(sets, alias, setPart);
+      if (!sh.length || namePart.length < 2) continue;
+      const ids = new Set(sh.map(x => x.id));
+      const cards = await tcg(`${lang()}/cards?name=${encodeURIComponent(namePart)}&pagination:page=1&pagination:itemsPerPage=250`).catch(() => []);
+      const inSet = cards.filter(c => ids.has(setIdFromCardId(c.id, c.localId)));
+      if (inSet.length) return { list: inSet, namePart, sets: sh };
+    }
+    return null;
+  }
   // Alle Karten eines Sets, nach Nummer sortiert (Buchstaben-Nummern wie GG05 hinten)
   async function openSet(id, info) {
     res.innerHTML = `<p class="muted">Set wird geladen …</p>`;
@@ -2531,7 +2552,14 @@ function openAdd() {
         const hit = list.filter(c => numKey(c.localId) === numKey(numQ));
         if (hit.length) list = hit;
       }
-      const setHits = numQ ? [] : matchSets(sets, enSets, raw);
+      let setHits = numQ ? [] : matchSets(sets, enSets, raw);
+      if (!list.length) {
+        const combo = await nameInSet(nameQ, sets, enSets);
+        if (combo) {
+          list = combo.list; setHits = [];
+          if (numQ) { const hit = list.filter(c => numKey(c.localId) === numKey(numQ)); if (hit.length) list = hit; }
+        }
+      }
       if (!list.length && setHits.length === 1) return openSet(setHits[0].id, setHits[0]);
       if (!list.length && !setHits.length) {
         res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, den Setnamen, die Kartennummer (z. B. 6/105) oder die andere Sprache.</p>`;
