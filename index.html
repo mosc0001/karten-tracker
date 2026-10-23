@@ -16,14 +16,14 @@
   --bg:#F2F2F7;--surface:#FFFFFF;--surface2:#F2F2F7;--fill:rgba(118,118,128,.12);--fill2:rgba(118,118,128,.2);
   --ink:#000000;--muted:rgba(60,60,67,.6);--faint:rgba(60,60,67,.3);--line:rgba(60,60,67,.18);
   --accent:#007AFF;--accent-ink:#FFFFFF;--tint:rgba(0,122,255,.12);--danger:#FF3B30;--up:#34C759;--down:#FF3B30;
-  --glass:rgba(249,249,249,.78);--shadow:0 10px 30px rgba(0,0,0,.12);--poster-shadow:0 8px 20px rgba(0,0,0,.18);
+  --glass:rgba(249,249,249,.78);--bar:rgba(246,246,248,.9);--shadow:0 10px 30px rgba(0,0,0,.12);--poster-shadow:0 8px 20px rgba(0,0,0,.18);
   --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","Segoe UI",Roboto,system-ui,sans-serif;
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#000000;--surface:#1C1C1E;--surface2:#2C2C2E;--fill:rgba(118,118,128,.24);--fill2:rgba(118,118,128,.36);
   --ink:#FFFFFF;--muted:rgba(235,235,245,.6);--faint:rgba(235,235,245,.3);--line:rgba(84,84,88,.55);
   --accent:#0A84FF;--accent-ink:#FFFFFF;--tint:rgba(10,132,255,.2);--danger:#FF453A;--up:#30D158;--down:#FF453A;
-  --glass:rgba(22,22,24,.72);--shadow:0 20px 50px rgba(0,0,0,.6);--poster-shadow:0 10px 26px rgba(0,0,0,.55);
+  --glass:rgba(22,22,24,.72);--bar:rgba(18,18,20,.88);--shadow:0 20px 50px rgba(0,0,0,.6);--poster-shadow:0 10px 26px rgba(0,0,0,.55);
 }}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -45,7 +45,7 @@ a{color:var(--accent)}
 /* Navigationsleiste aus Glas, kleiner Titel erscheint beim Scrollen */
 .top{position:sticky;top:0;z-index:8;display:flex;justify-content:space-between;align-items:center;gap:12px;
   --bleed:calc((100vw - 100%) / 2);margin:0 calc(-1 * var(--bleed));padding:calc(10px + env(safe-area-inset-top)) var(--bleed) 10px;background:transparent;transition:background .2s,box-shadow .2s}
-body.scrolled .top{background:var(--glass);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);box-shadow:0 .5px 0 var(--line)}
+body.scrolled .top{background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);box-shadow:0 .5px 0 var(--line)}
 .top .ntitle{font-size:17px;font-weight:600;opacity:0;transform:translateY(4px);transition:opacity .2s,transform .2s;white-space:nowrap}
 body.scrolled .top .ntitle{opacity:1;transform:none}
 .ltitle{font-size:34px;font-weight:700;letter-spacing:.01em;margin:2px 0 14px}
@@ -92,6 +92,17 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
 /* Regale */
 .shelf{margin:0 0 30px}
 .shelf h2,.section-title{font-size:22px;font-weight:700;margin:0 0 12px}
+.shelf-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px}
+.shelf-head h2{margin:0;flex:1;min-width:0}
+.shelf-ctl{display:flex;align-items:center;gap:8px;flex:none}
+.shelf-all{font-size:15px;font-weight:500;margin-right:6px;white-space:nowrap}
+.shelf-nav{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:var(--fill);color:var(--ink)}
+.shelf-nav svg{width:16px;height:16px}
+.shelf-nav:hover:not(:disabled){background:var(--fill2)}
+.shelf-nav:disabled{opacity:.3}
+.shelf.fits .shelf-nav{visibility:hidden}
+/* Mit dem Finger wird gewischt: dort keine Pfeile */
+@media (hover:none) and (pointer:coarse){.shelf-nav{display:none}}
 .shelf-row{--bleed:calc((100vw - 100%) / 2);list-style:none;margin:0 calc(-1 * var(--bleed));padding:4px var(--bleed) 14px;display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x proximity;scroll-padding:0 20px;scrollbar-width:none}
 .shelf-row::-webkit-scrollbar{display:none}
 .shelf-row li{flex:none;width:128px;scroll-snap-align:start}
@@ -133,6 +144,8 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
 .fbadge{background:var(--accent);color:#fff;border-radius:999px;padding:0 7px;font-size:12px;font-weight:700;line-height:1.55}
 .fquick{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:2px 0;min-width:0}
 .fquick::-webkit-scrollbar{display:none}
+/* rechter Rand blendet aus, damit sichtbar ist, dass es weitergeht */
+.fquick{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);padding-right:24px}
 .factive{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .factive:empty{display:none}
 .achip{display:inline-flex;align-items:center;gap:2px;padding:4px 6px 4px 12px;border:0;border-radius:999px;background:var(--tint);color:var(--accent);font-size:13px;font-weight:500}
@@ -161,6 +174,23 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
 .totseg{display:inline-flex;margin:0 0 6px}
 .sleeve .seg .on{background:rgba(255,255,255,.92);color:#000}
 
+/* Suche und Filter am Rechner: kompakte Werkzeugleiste, beim Scrollen unter der Navigationsleiste angeheftet */
+@media (min-width:760px){
+  .filters{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"search sort" "fbar fbar" "active active";align-items:center;column-gap:12px}
+  .filters>.sugwrap{grid-area:search}
+  .filters>.fbar{grid-area:fbar}
+  .filters>.factive{grid-area:active}
+  .filters>.frow2{grid-area:sort;flex-wrap:nowrap}
+}
+@media (min-width:1100px){
+  .filters{grid-template-columns:minmax(240px,320px) minmax(0,1fr) auto;grid-template-areas:"search fbar sort" "active active active"}
+}
+@media (min-width:760px) and (min-height:640px){
+  .filters{position:sticky;top:var(--navh,56px);z-index:6;--bleed:calc((100vw - 100%) / 2);margin-left:calc(-1 * var(--bleed));margin-right:calc(-1 * var(--bleed));padding:10px var(--bleed);transition:background .2s,box-shadow .2s}
+  .filters.stuck{background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);box-shadow:0 .5px 0 var(--line)}
+  body.scrolled .top:has(~ .filters.stuck),body.scrolled .wrap:has(.filters.stuck) .top{box-shadow:none}
+}
+
 /* Liste: gruppierte Liste wie in iOS */
 .list{list-style:none;margin:0;padding:0;background:var(--surface);border-radius:14px;overflow:hidden}
 .list li{position:relative}
@@ -177,6 +207,14 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
 .tag.first{background:var(--tint);color:var(--accent)}
 .price{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:16px}
 .price small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+/* Am Rechner: Spalten wie in einer Mac-Liste (Karte | Merkmale | Wert) */
+@media (min-width:900px){
+  .rmain{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);grid-template-areas:"name meta" "rset meta";column-gap:20px;align-items:center}
+  .rmain .name{grid-area:name;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rmain .rset{grid-area:rset}
+  .rmain .meta{grid-area:meta;margin-top:0}
+  .row .price{min-width:13rem}
+}
 @media (max-width:599px){
   .row{grid-template-columns:44px minmax(0,1fr) auto;gap:12px;padding:10px 14px}
   .thumb{width:44px;height:61px}
@@ -240,7 +278,7 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .dart img{cursor:zoom-in}
 .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .sheet{position:relative;background:var(--surface);width:100%;max-width:820px;max-height:93vh;overflow:auto;border-radius:16px 16px 0 0;padding:22px 20px calc(26px + env(safe-area-inset-bottom));box-shadow:var(--shadow)}
-.sheet::before{content:"";position:absolute;top:7px;left:50%;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--faint)}
+.sheet::before{content:"";position:absolute;z-index:4;top:7px;left:50%;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--faint)}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .32s cubic-bezier(.2,.9,.25,1)}@keyframes up{from{transform:translateY(40px);opacity:.4}}}
 @media (min-width:760px){
   .backdrop{align-items:center;padding:4vh 20px}
@@ -248,7 +286,11 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
   .sheet::before{display:none}
   @media (prefers-reduced-motion:no-preference){.sheet{animation:pop .28s cubic-bezier(.2,.9,.25,1)}@keyframes pop{from{transform:scale(.96);opacity:0}}}
 }
-.sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+.sheet{--spt:22px;--spx:20px}
+@media (min-width:760px){.sheet{--spt:26px;--spx:30px}}
+/* Kopf mit Titel und Schließen bleibt beim Scrollen im Fenster stehen (Glas) */
+.sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;position:sticky;top:calc(-1 * var(--spt));z-index:3;
+  margin:calc(-1 * var(--spt)) calc(-1 * var(--spx)) 12px;padding:calc(var(--spt) - 4px) var(--spx) 10px;background:color-mix(in srgb,var(--surface) 86%,transparent);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);box-shadow:0 .5px 0 var(--line)}
 .sheet-head h2{font-size:22px;font-weight:700}
 .searchrow{display:flex;gap:8px}
 .searchrow input{margin-top:0}
@@ -1525,6 +1567,8 @@ function wireSuggestions(input) {
 }
 
 const ICON_REFRESH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>`;
+const ICON_CHEV_L = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 6-6 6 6 6"/></svg>`;
+const ICON_CHEV_R = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 6 6 6-6 6"/></svg>`;
 const ICON_MORE = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
 const pctFmt = new Intl.NumberFormat("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -1587,7 +1631,7 @@ function rowHtml(r) {
   const c = r.c;
   return `<li><button class="row" data-id="${esc(c.id)}">
     ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" data-tid="${esc(c.tcgdex_id || "")}" onerror="imgFallback(this)">` : `<span class="thumb"></span>`}
-    <span>
+    <span class="rmain">
       <span class="name">${esc(c.name)}</span>
       <span class="rset">${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
       <span class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}</span>
@@ -1626,11 +1670,18 @@ function shelvesHtml(all, withProv) {
   if (all.length < 6) return "";
   const top = all.filter(r => r.counted || (withProv && r.unit != null)).sort((a, b) => b.total - a.total).slice(0, 15);
   const recent = [...all].sort((a, b) => String(b.c.created_at).localeCompare(String(a.c.created_at))).slice(0, 15);
-  const shelf = (title, rows) => rows.length < 3 ? "" : `<section class="shelf" aria-label="${esc(title)}">
-      <h2>${esc(title)}</h2>
+  const shelf = (title, rows, sort) => rows.length < 3 ? "" : `<section class="shelf" aria-label="${esc(title)}">
+      <div class="shelf-head">
+        <h2>${esc(title)}</h2>
+        <div class="shelf-ctl">
+          <button class="linkish shelf-all" data-all="${sort}">Alle anzeigen</button>
+          <button class="shelf-nav" data-dir="-1" aria-label="${esc(title)}: zurückblättern" disabled>${ICON_CHEV_L}</button>
+          <button class="shelf-nav" data-dir="1" aria-label="${esc(title)}: weiterblättern">${ICON_CHEV_R}</button>
+        </div>
+      </div>
       <ul class="shelf-row">${rows.map(posterHtml).join("")}</ul>
     </section>`;
-  return shelf("Wertvollste Karten", top) + shelf("Zuletzt hinzugefügt", recent);
+  return shelf("Wertvollste Karten", top, "value") + shelf("Zuletzt hinzugefügt", recent, "newest");
 }
 
 // Bild der wertvollsten Karte für den Kopfbereich
@@ -1792,14 +1843,76 @@ function renderMain() {
     if (b) openDetail(b.dataset.id);
   };
   $("#shelves").onclick = e => {
+    const nav = e.target.closest(".shelf-nav");
+    if (nav) { pageShelf(nav.closest(".shelf").querySelector(".shelf-row"), Number(nav.dataset.dir)); return; }
+    const all = e.target.closest("[data-all]");
+    if (all) {
+      f.sort = all.dataset.all;
+      const sel = $("#fsort");
+      if (sel) sel.value = f.sort;
+      renderList();
+      ($("#alltitle") || $(".filters")).scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     const b = e.target.closest("[data-id]");
     if (b) openDetail(b.dataset.id);
   };
+  wireShelves();
   // Navigationsleiste: Glas und kleiner Titel, sobald der große Titel weggescrollt ist
-  const onScroll = () => document.body.classList.toggle("scrolled", window.scrollY > 40);
+  const filtersEl = $(".filters");
+  const onScroll = () => {
+    document.body.classList.toggle("scrolled", window.scrollY > 40);
+    if (filtersEl) {
+      const navh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--navh")) || 0;
+      filtersEl.classList.toggle("stuck", getComputedStyle(filtersEl).position === "sticky" && filtersEl.getBoundingClientRect().top <= navh + 1);
+    }
+  };
   window.onscroll = onScroll;
+  setNavHeight();
   onScroll();
   renderList();
+}
+
+// Regale blättern wie in der TV-App: seitenweise um ganze Karten, Pfeile an den Enden ausgegraut
+function pageShelf(row, dir) {
+  const li = row.querySelector("li");
+  if (!li) return;
+  const cs = getComputedStyle(row);
+  const gap = parseFloat(cs.columnGap || cs.gap) || 0;
+  const visible = row.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const item = li.getBoundingClientRect().width + gap;
+  const step = Math.max(1, Math.floor((visible + gap) / item)) * item;
+  const max = row.scrollWidth - row.clientWidth;
+  // auf ganze Karten ausrichten, damit links immer eine Karte bündig beginnt
+  let target = Math.round((row.scrollLeft + dir * step) / item) * item;
+  target = Math.min(max, Math.max(0, target));
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  row.scrollTo({ left: target, behavior: reduce ? "auto" : "smooth" });
+}
+function updateShelf(sec) {
+  const row = sec.querySelector(".shelf-row");
+  const [prev, next] = sec.querySelectorAll(".shelf-nav");
+  const max = row.scrollWidth - row.clientWidth;
+  sec.classList.toggle("fits", max <= 2);
+  prev.disabled = row.scrollLeft <= 2;
+  next.disabled = row.scrollLeft >= max - 2;
+}
+function wireShelves() {
+  document.querySelectorAll(".shelf").forEach(sec => {
+    const row = sec.querySelector(".shelf-row");
+    let t = 0;
+    row.addEventListener("scroll", () => { cancelAnimationFrame(t); t = requestAnimationFrame(() => updateShelf(sec)); }, { passive: true });
+    updateShelf(sec);
+  });
+}
+window.addEventListener("resize", () => {
+  document.querySelectorAll(".shelf").forEach(updateShelf);
+  setNavHeight();
+});
+// Höhe der Navigationsleiste für die angeheftete Suchleiste
+function setNavHeight() {
+  const top = document.querySelector(".top");
+  if (top) document.documentElement.style.setProperty("--navh", top.offsetHeight + "px");
 }
 
 function closeMenu(focusButton) {
