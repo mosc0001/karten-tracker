@@ -259,6 +259,7 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .pick img,.noimg{width:44px;height:61px;object-fit:contain;border-radius:4px;flex:none}
 .noimg{background:var(--fill)}
 .pick small{display:block;color:var(--muted)}
+.shipin{width:5.2em;display:inline-block;margin:0;padding:4px 8px;text-align:right;font-size:15px}
 .sethits h4,.reshead{font-size:13px;font-weight:600;color:var(--muted);margin:14px 0 2px}
 .setpick .seticon{width:44px;height:44px;flex:none;border-radius:10px;background:var(--fill);display:flex;align-items:center;justify-content:center}
 .setpick .seticon img{width:28px;height:28px;object-fit:contain}
@@ -435,6 +436,19 @@ const SUPABASE_KEY = "sb_publishable_L4T61xqNhqn9QyOYW_IGPg_I70TkeeL";
 const SCOUT_ACTIONS = "https://github.com/mosc0001/snipe-scout/actions";
 const TCGDEX = "https://api.tcgdex.net/v2";
 const DEFAULTS = { discount: 0.15, max_total_eur: 400 };   // wie in watchlist.yaml
+// Versand innerhalb Deutschlands (versichertes Paket für einen Slab), änderbar in der Kartenansicht, gilt für alle Karten
+const SHIP_DE_DEFAULT = 6.5;
+let shipDE = SHIP_DE_DEFAULT;
+try { const v = parseFloat(localStorage.getItem("snipe_ship_de")); if (v >= 0 && v < 100) shipDE = v; } catch (e) { /* Standard */ }
+// Höchstgebot, wenn der Verkäufer in Deutschland sitzt: Der Fairwert ist schon ein Endpreis aus Käufersicht
+// (inkl. Mehrwertsteuer, bei Nicht-EU-Verkäufen inkl. Einfuhrumsatzsteuer). Bei Versand aus Deutschland kommt nur der
+// Inlandsversand dazu: Gebot + Versand ≤ Fairwert × (1 − Abschlag), höchstens Budget − Versand.
+function deBid(c) {
+  if (c.fair_eur == null) return null;
+  let v = Number(c.fair_eur) * (1 - Number(c.discount || 0)) - shipDE;
+  if (c.max_total_eur) v = Math.min(v, Number(c.max_total_eur) - shipDE);
+  return Math.max(0, Math.floor(v));
+}
 const UPDATE2_MSG = "Bitte zuerst snipe-update-2.sql im Supabase SQL Editor ausführen, dann erneut speichern.";
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -574,7 +588,7 @@ function render() {
           <ul class="list" style="margin-top:8px">${state.cards.filter(c => !c.active).map(cardRow).join("")}</ul></details>` : ""}
       </section>
       <button id="addfab" class="primary fab">+ Karte</button>
-      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
+      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. „DE“ gilt für Verkäufer in Deutschland: Mehrwertsteuer ist im Preis enthalten, es kommt nur der Inlandsversand dazu (Standard ${eur(SHIP_DE_DEFAULT, 2)}, in der Kartenansicht änderbar). „EU“ ist der Richtwert des Scouts mit dessen Versandschätzung. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
     </div>`;
 
   wire();
@@ -608,7 +622,7 @@ function cardRow(c) {
         <span class="tag">−${Math.round(Number(c.discount || 0) * 100)} %</span>
         ${state.cands.some(x => x.card_id === c.id && new Date(x.end_at) > Date.now()) ? `<span class="tag hot">Treffer</span>` : ""}</span>
     </span>
-    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>max. ${eur(c.max_bid_eur)}</small></span>
+    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>max. ${deBid(c) != null ? `${eur(deBid(c))} DE · ` : ""}${eur(c.max_bid_eur)} EU</small></span>
   </button></li>`;
 }
 
@@ -801,7 +815,9 @@ function openCard(id) {
     <p class="dprice">${c.fair_eur != null ? eur(c.fair_eur) : "–"}</p>
     <p class="dsmall muted" style="margin:0 0 10px">Fairwert PSA 10 · ${c.fair_n ? `Median aus ${c.fair_n} Verkäufen` : "noch zu wenige Verkäufe"}${c.comps_source ? " · " + esc(c.comps_source) : ""} · Stand ${esc(ago(c.comps_at))}</p>
     <dl class="dstats">
-      <div class="drow mine"><dt>Höchstgebot (Richtwert)</dt><dd>${eur(c.max_bid_eur)} <small>bei EU-Versand</small></dd></div>
+      <div class="drow mine"><dt>Höchstgebot bei Versand aus Deutschland</dt><dd id="debid">${deBid(c) != null ? eur(deBid(c)) : "–"} <small>inkl. MwSt.</small></dd></div>
+      <div class="drow"><dt>Inlandsversand (geschätzt)</dt><dd><input id="shipde" class="shipin" type="number" min="0" max="99" step="0.5" value="${shipDE}" inputmode="decimal" aria-label="Inlandsversand in Euro"> €</dd></div>
+      <div class="drow"><dt>Höchstgebot bei EU-Versand</dt><dd>${eur(c.max_bid_eur)} <small>Richtwert des Scouts</small></dd></div>
       <div class="drow"><dt>Spanne</dt><dd>${c.fair_low != null ? `${eur(c.fair_low)} – ${eur(c.fair_high)}` : "–"}</dd></div>
       <div class="drow"><dt>Sicherheitsabschlag</dt><dd>${Math.round(Number(c.discount || 0) * 100)} %</dd></div>
       <div class="drow"><dt>Budgetgrenze inkl. Versand</dt><dd>${c.max_total_eur ? eur(c.max_total_eur) : "keine"}</dd></div>
@@ -838,6 +854,16 @@ function openCard(id) {
 }
 
 function wireCardActions(sheet, c) {
+  const sd = $("#shipde", sheet);
+  if (sd) sd.oninput = () => {
+    const v = parseFloat(String(sd.value).replace(",", "."));
+    if (!(v >= 0 && v < 100)) return;
+    shipDE = v;
+    try { localStorage.setItem("snipe_ship_de", String(v)); } catch (e) { /* nur für diese Sitzung */ }
+    const b = deBid(c);
+    $("#debid", sheet).innerHTML = `${b != null ? eur(b) : "–"} <small>inkl. MwSt.</small>`;
+    state.dirty = true; // Liste zeigt den Wert ebenfalls
+  };
   const tg = $("#toggleact", sheet), del = $("#delcard", sheet), err = $("#acterr", sheet);
   if (tg) tg.onclick = async () => {
     tg.disabled = true;
@@ -913,7 +939,8 @@ function openAdd() {
       <input id="q" type="search" placeholder="Name, Set oder Nummer, z. B. Lapras, Crown Zenith oder 202/165" enterkeyhint="search" autocomplete="off">
       <button id="sbtn" class="primary">Suchen</button>
     </div>
-    <div id="res"></div>`);
+    <div id="res"></div>
+    <p class="dsmall" style="margin-top:14px"><button class="linkish" id="manual">Karte nicht gefunden? Manuell anlegen</button></p>`);
   const res = $("#res", sheet);
 
   sheet.querySelectorAll("#langseg button").forEach(b => b.onclick = () => {
@@ -1031,6 +1058,48 @@ function openAdd() {
       const c = await tcg(`${s.lang}/cards/${encodeURIComponent(id)}`);
       // Name in der anderen Sprache als Alternative (z. B. venusaur|bisaflor), Titel sind oft gemischt
       const other = await tcg(`${s.lang === "en" ? "de" : "en"}/cards/${encodeURIComponent(id)}`).catch(() => null);
+      renderPicked(c, other, null);
+    } catch (e) { res.innerHTML = `<p class="err">Karte konnte nicht geladen werden: ${esc(e.message)}</p>`; }
+  }
+
+  // Karte ohne TCGdex-Eintrag (neues Set, Promo, Exot): Angaben selbst eintragen, danach dasselbe Formular
+  function manualForm() {
+    res.innerHTML = `
+      ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
+      <h3 style="margin:14px 0 4px">Karte manuell anlegen</h3>
+      <p class="muted dsmall" style="margin:0">Für Karten, die TCGdex noch nicht kennt, z. B. aus einem neuen Set. Sprache wie oben gewählt (${s.lang === "en" ? "Englisch" : "Deutsch"}).</p>
+      <div class="addform">
+        <label>Name auf der Karte<input id="mname" placeholder="z. B. Growlithe" autocomplete="off"></label>
+        <label>Name in der anderen Sprache (optional)<input id="malt" placeholder="${s.lang === "en" ? "z. B. Fukano" : "z. B. Growlithe"}" autocomplete="off">
+          <small class="hint">Verkäufer schreiben oft beide Namen in den Titel.</small></label>
+        <label>Set<input id="mset" placeholder="z. B. Delta Reign" autocomplete="off"></label>
+        <div class="two">
+          <label>Nummer<input id="mnum" placeholder="z. B. 106 oder GG05" autocomplete="off"></label>
+          <label>Setgröße (optional)<input id="mtot" type="number" min="1" max="999" placeholder="z. B. 103" inputmode="numeric"></label>
+        </div>
+        <label>Bildlink (optional)<input id="mimg" type="url" placeholder="https://…" autocomplete="off"></label>
+        <button id="mnext" class="primary wide" style="margin-top:18px">Weiter</button>
+        <p class="err" id="merr"></p>
+      </div>`;
+    const back = $("#back", sheet);
+    if (back) back.onclick = () => showResults(s.results);
+    $("#mname", sheet).focus();
+    $("#mnext", sheet).onclick = () => {
+      const name = $("#mname", sheet).value.trim(), alt = $("#malt", sheet).value.trim();
+      const setName = $("#mset", sheet).value.trim(), num = $("#mnum", sheet).value.trim().toUpperCase();
+      const tot = parseInt($("#mtot", sheet).value, 10), img = $("#mimg", sheet).value.trim();
+      const err = $("#merr", sheet);
+      if (!name || !num) { err.textContent = "Bitte mindestens Name und Nummer eintragen."; return; }
+      if (!/^[A-Z]{0,4}\d{1,3}[A-Z]?$/.test(num)) { err.textContent = "Nummer bitte ohne Setgröße eintragen, z. B. 106 oder GG05."; return; }
+      if (img && !/^https:\/\//i.test(img)) { err.textContent = "Der Bildlink muss mit https:// beginnen."; return; }
+      const c = { id: null, name, localId: /^\d+$/.test(num) ? String(parseInt(num, 10)).padStart(3, "0") : num, rarity: "manuell angelegt",
+        set: { id: "manuell", name: setName, cardCount: { official: tot > 0 ? tot : null } } };
+      renderPicked(c, alt ? { name: alt } : null, img || null);
+    };
+  }
+
+  function renderPicked(c, other, imgOverride) {
+    {
       s.picked = c;
       // Offizielle Setgröße nur bei reinen Zahlen (GG05, TG12 usw. haben eigene Zählungen)
       const official = /^\d+$/.test(String(c.localId)) ? (c.set && c.set.cardCount && c.set.cardCount.official) : null;
@@ -1041,8 +1110,8 @@ function openAdd() {
       const display = `${c.name} ${official ? nums.search : c.localId}${setName ? ` (${setName})` : ""} ${s.lang.toUpperCase()}`;
       const searchTerm = `${c.name} ${nums.search} PSA 10`;
       const warns = criteriaWarnings(c);
-      const imgUrl = c.image ? `${c.image}/low.webp` : null;
-      const exists = state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang);
+      const imgUrl = imgOverride || (c.image ? `${c.image}/low.webp` : null);
+      const exists = c.id ? state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang) : null;
       res.innerHTML = `
         ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
         <div class="preview">
@@ -1073,7 +1142,7 @@ function openAdd() {
       const back = $("#back", sheet);
       if (back) back.onclick = () => showResults(s.results);
       $("#save", sheet).onclick = () => save(c, imgUrl, setName, official);
-    } catch (e) { res.innerHTML = `<p class="err">Karte konnte nicht geladen werden: ${esc(e.message)}</p>`; }
+    }
   }
 
   async function save(c, imgUrl, setName, official) {
@@ -1109,6 +1178,7 @@ function openAdd() {
   }
 
   $("#sbtn", sheet).onclick = search;
+  $("#manual", sheet).onclick = manualForm;
   $("#q", sheet).addEventListener("keydown", e => { if (e.key === "Enter") search(); });
   $("#q", sheet).focus();
 }
