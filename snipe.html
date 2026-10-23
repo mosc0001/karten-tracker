@@ -443,6 +443,17 @@ try { const v = parseFloat(localStorage.getItem("snipe_ship_de")); if (v >= 0 &&
 // Höchstgebot, wenn der Verkäufer in Deutschland sitzt: Der Fairwert ist schon ein Endpreis aus Käufersicht
 // (inkl. Mehrwertsteuer, bei Nicht-EU-Verkäufen inkl. Einfuhrumsatzsteuer). Bei Versand aus Deutschland kommt nur der
 // Inlandsversand dazu: Gebot + Versand ≤ Fairwert × (1 − Abschlag), höchstens Budget − Versand.
+// Versand aus den USA (geschätzt, änderbar) und Höchstgebot für US-Verkäufer: Auf Gebot und Versand kommen 19 %
+// Einfuhrumsatzsteuer: (Gebot + Versand) × 1,19 ≤ Fairwert × (1 − Abschlag), höchstens Budget. Zoll ist nicht eingerechnet.
+const SHIP_US_DEFAULT = 25;
+let shipUS = SHIP_US_DEFAULT;
+try { const v = parseFloat(localStorage.getItem("snipe_ship_us")); if (v >= 0 && v < 200) shipUS = v; } catch (e) { /* Standard */ }
+function usBid(c) {
+  if (c.fair_eur == null) return null;
+  let total = Number(c.fair_eur) * (1 - Number(c.discount || 0));
+  if (c.max_total_eur) total = Math.min(total, Number(c.max_total_eur));
+  return Math.max(0, Math.floor(total / 1.19 - shipUS));
+}
 function deBid(c) {
   if (c.fair_eur == null) return null;
   let v = Number(c.fair_eur) * (1 - Number(c.discount || 0)) - shipDE;
@@ -588,7 +599,7 @@ function render() {
           <ul class="list" style="margin-top:8px">${state.cards.filter(c => !c.active).map(cardRow).join("")}</ul></details>` : ""}
       </section>
       <button id="addfab" class="primary fab">+ Karte</button>
-      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. „DE“ gilt für Verkäufer in Deutschland: Mehrwertsteuer ist im Preis enthalten, es kommt nur der Inlandsversand dazu (Standard ${eur(SHIP_DE_DEFAULT, 2)}, in der Kartenansicht änderbar). „EU“ ist der Richtwert des Scouts mit dessen Versandschätzung. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
+      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. „DE“ gilt für Verkäufer in Deutschland: Mehrwertsteuer ist im Preis enthalten, es kommt nur der Inlandsversand dazu (Standard ${eur(SHIP_DE_DEFAULT, 2)}, in der Kartenansicht änderbar). „EU“ ist der Richtwert des Scouts mit dessen Versandschätzung. „US“ gilt für Verkäufer in den USA: Auf Gebot und Versand kommen 19 % Einfuhrumsatzsteuer (Standard-Versand ${eur(SHIP_US_DEFAULT)}, änderbar; möglicher Zoll über 150 € nicht eingerechnet). Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
     </div>`;
 
   wire();
@@ -622,7 +633,7 @@ function cardRow(c) {
         <span class="tag">−${Math.round(Number(c.discount || 0) * 100)} %</span>
         ${state.cands.some(x => x.card_id === c.id && new Date(x.end_at) > Date.now()) ? `<span class="tag hot">Treffer</span>` : ""}</span>
     </span>
-    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>max. ${deBid(c) != null ? `${eur(deBid(c))} DE · ` : ""}${eur(c.max_bid_eur)} EU</small></span>
+    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>max. ${deBid(c) != null ? `${eur(deBid(c))} DE · ` : ""}${eur(c.max_bid_eur)} EU${usBid(c) != null ? ` · ${eur(usBid(c))} US` : ""}</small></span>
   </button></li>`;
 }
 
@@ -818,6 +829,9 @@ function openCard(id) {
       <div class="drow mine"><dt>Höchstgebot bei Versand aus Deutschland</dt><dd id="debid">${deBid(c) != null ? eur(deBid(c)) : "–"} <small>inkl. MwSt.</small></dd></div>
       <div class="drow"><dt>Inlandsversand (geschätzt)</dt><dd><input id="shipde" class="shipin" type="number" min="0" max="99" step="0.5" value="${shipDE}" inputmode="decimal" aria-label="Inlandsversand in Euro"> €</dd></div>
       <div class="drow"><dt>Höchstgebot bei EU-Versand</dt><dd>${eur(c.max_bid_eur)} <small>Richtwert des Scouts</small></dd></div>
+      <div class="drow"><dt>Höchstgebot bei Versand aus den USA</dt><dd id="usbid">${usBid(c) != null ? eur(usBid(c)) : "–"} <small>Gebot, zzgl. 19 % EUSt</small></dd></div>
+      <div class="drow"><dt>US-Versand (geschätzt)</dt><dd><input id="shipus" class="shipin" type="number" min="0" max="199" step="1" value="${shipUS}" inputmode="decimal" aria-label="Versand aus den USA in Euro"> €</dd></div>
+      ${usBid(c) != null && usBid(c) * 1.19 > 150 ? `<p class="dsmall muted" style="margin:4px 0 0">Über 150 € Warenwert kann bei US-Sendungen zusätzlich Zoll anfallen, der hier nicht eingerechnet ist.</p>` : ""}
       <div class="drow"><dt>Spanne</dt><dd>${c.fair_low != null ? `${eur(c.fair_low)} – ${eur(c.fair_high)}` : "–"}</dd></div>
       <div class="drow"><dt>Sicherheitsabschlag</dt><dd>${Math.round(Number(c.discount || 0) * 100)} %</dd></div>
       <div class="drow"><dt>Budgetgrenze inkl. Versand</dt><dd>${c.max_total_eur ? eur(c.max_total_eur) : "keine"}</dd></div>
@@ -863,6 +877,16 @@ function wireCardActions(sheet, c) {
     const b = deBid(c);
     $("#debid", sheet).innerHTML = `${b != null ? eur(b) : "–"} <small>inkl. MwSt.</small>`;
     state.dirty = true; // Liste zeigt den Wert ebenfalls
+  };
+  const su = $("#shipus", sheet);
+  if (su) su.oninput = () => {
+    const v = parseFloat(String(su.value).replace(",", "."));
+    if (!(v >= 0 && v < 200)) return;
+    shipUS = v;
+    try { localStorage.setItem("snipe_ship_us", String(v)); } catch (e) { /* nur für diese Sitzung */ }
+    const b = usBid(c);
+    $("#usbid", sheet).innerHTML = `${b != null ? eur(b) : "–"} <small>Gebot, zzgl. 19 % EUSt</small>`;
+    state.dirty = true;
   };
   const tg = $("#toggleact", sheet), del = $("#delcard", sheet), err = $("#acterr", sheet);
   if (tg) tg.onclick = async () => {
