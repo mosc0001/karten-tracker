@@ -154,6 +154,16 @@ function finishFromText(s, isField = false) {
   return null;
 }
 
+/* ---------- Muster der Reverse-Holo-Folie (Poké Ball, Master Ball) ---------- */
+// Seit Pokémon 151 gibt es in manchen Sets Reverse Holos mit Poké-Ball- bzw. Master-Ball-Muster, deutlich teurer
+export const PATTERNS = { pokeball: "Poké Ball", masterball: "Master Ball" };
+export function patternFromText(s) {
+  const t = norm(s);
+  if (/master ?ball|meisterball/.test(t)) return "masterball";
+  if (/poke ?ball|pokeball|poke-ball|pokeball pattern/.test(t)) return "pokeball";
+  return null;
+}
+
 /* ---------- Datum ---------- */
 const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 function parseSoldAt(row, detail) {
@@ -272,6 +282,9 @@ export function parseSale(row, detail = null) {
   const rp = norm(title + " " + featureText).match(/classic collection|celebrations|25th anniversary|legendary collection|base set 2|basis[- ]?set 2/);
   const reprint = rp ? rp[0] : null;
 
+  // Muster (Poké Ball / Master Ball): Titel und Merkmale
+  const pattern = patternFromText(`${title} | ${featureText} | ${spec(sp, K.finish)}`);
+
   // Ausführung
   const finishField = spec(sp, K.finish);
   let finish = finishField ? finishFromText(finishField, true) : null;
@@ -308,7 +321,7 @@ export function parseSale(row, detail = null) {
     gradeKey: gradeInfo && gradeInfo.key ? gradeInfo.key : null,
     gradeUncertain: Boolean(gradeInfo && gradeInfo.uncertain),
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
-    stage, stageSource, language, edition, variant, reprint, finish, conflicts,
+    stage, stageSource, language, edition, variant, reprint, finish, pattern, conflicts,
     image: pickImage(row, detail),
   };
 }
@@ -422,6 +435,13 @@ function check(card, sale) {
   if (card.finish === "reverse_holo") r.finish = fin === "reverse_holo" ? "match" : fin ? "mismatch" : "unproven";
   else if (fin) r.finish = fin === card.finish ? "match" : "mismatch";
   else r.finish = only && only === card.finish ? "match" : "unknown";
+  // Muster: Karten, die selbst "Poké Ball"/"Master Ball" heißen (Trainerkarten), nicht über den Titel prüfen
+  const ballName = /ball/.test(norm(card.name));
+  const salePattern = ballName ? null : sale.pattern;
+  if (card.pattern) {
+    // Ball-Muster gibt es nur als Reverse; ohne Nennung im Titel ist es meist die normale Version
+    r.finish = salePattern === card.pattern ? "match" : salePattern ? "mismatch" : "unproven";
+  } else if (salePattern && card.finish !== "holo") r.finish = "mismatch";
   // Zustand
   // Bewertete Karte: Statt des Zustands zählt der Grade (Prüfdienst, Note, Zusatz wie Pristine)
   if (card.graded) { const k = saleGradeFor(card, sale).key; r.condition = k ? (k === card.gradeKey ? "match" : "mismatch") : "unknown"; }
@@ -604,13 +624,17 @@ const graderPart = (card) => {
 };
 const tail = (card) => (card.grader ? EXCLUDE_GRADED : EXCLUDE);
 
+// Suchbegriff für Muster-Karten (statt "reverse": Verkäufer schreiben oft nur "Master Ball Holo")
+const patternPart = (card) => card.pattern === "masterball" ? "(masterball,master)" : card.pattern === "pokeball" ? "(pokeball,poke,pokéball)" : "";
+const finishPart = (card) => card.pattern ? patternPart(card) : card.finish === "reverse_holo" ? "reverse" : "";
+
 export function buildQuery(card) {
   const jp = card.language === "JP";
   const terms = card.setId && ((jp && JP_SETS[card.setId] && JP_SETS[card.setId].terms) || SET_TERMS[card.setId]);
   // Japanische Setnamen (z. B. ポケモンカード151) stehen nicht in eBay-Titeln: ohne bekannte Begriffe kein Setteil
   const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : (jp ? null : card.setName);
   // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
-  return [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : "", jp ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
+  return [card.name, setPart, finishPart(card), jp ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Suche 2: Name + Kartennummer. Trifft fast nur die eigene Karte und reicht dadurch viel weiter zurück
@@ -626,14 +650,15 @@ export function buildNumberQuery(card) {
     nums = [...new Set([`${pre}${n.padStart(2, "0")}`, `${pre}${n}`])];
   }
   if (!nums.length) return null;
-  return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : "", card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
+  return [card.name, `(${nums.join(",")})`, finishPart(card), card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Automatische Suchbegriffe einer Karte aus der Datenbank (Job und App nutzen dieselben). Beide Suchen laufen,
 // die Ergebnisse werden zusammengeführt; doppelte Treffer erkennt der Job an der Artikelnummer.
 export function autoQueries(c) {
   const card = { name: c.name, setName: c.set_name, setId: setIdOf(c), number: c.card_number, setTotal: c.set_total,
-    finish: c.finish || (c.foil ? "holo" : "non_holo"), language: c.language, grader: c.grader && c.grade != null ? c.grader : null };
+    finish: c.finish || (c.foil ? "holo" : "non_holo"), language: c.language, grader: c.grader && c.grade != null ? c.grader : null,
+    pattern: c.tcg_meta && PATTERNS[c.tcg_meta.pattern] ? c.tcg_meta.pattern : null };
   const num = buildNumberQuery(card);
   // Japanische Karte aus einem Set ohne bekannte eBay-Begriffe: nur die Nummernsuche, "Name + japanisch" allein
   // brächte vor allem Verkäufe anderer Karten desselben Pokémon
@@ -665,6 +690,7 @@ export function cardFromRow(c) {
     finish: c.finish || (c.foil ? "holo" : "non_holo"),
     firstEdition: Boolean(c.first_edition),
     variants: meta.variants || null,
+    pattern: PATTERNS[meta.pattern] ? meta.pattern : null,
     graded: Boolean(c.grader && c.grade != null),
     grader: c.grader || null,
     gradeKey: gradeKey(c.grader, c.grade, c.grade_label),
