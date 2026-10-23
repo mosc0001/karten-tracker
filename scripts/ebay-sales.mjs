@@ -155,7 +155,10 @@ async function main() {
     () => { log("Hinweis: Spalte stage_override fehlt (update-zustand.sql ausführen), von Hand gesetzte Zustände werden nicht berücksichtigt."); return "card_id,item_id,sold_at,price_eur,title,url,parsed"; });
 
   /* 1. Karten und Hilfswerte */
-  const cards = await sbAll("cards?select=id,name,set_name,card_number,language,condition,finish,foil,first_edition,quantity,tcgdex_id,ebay_query,set_total,tcg_meta,ebay_checked_at&order=created_at");
+  // Grading-Spalten (ab update-grading.sql) mitlesen; ohne sie laufen alle Karten als ungradet
+  const gradeCols = await sb("cards?select=grader,grade,grade_label&limit=1").then(() => ",grader,grade,grade_label",
+    () => { log("Hinweis: Grading-Spalten fehlen (update-grading.sql ausführen), alle Karten gelten als ungradet."); return ""; });
+  const cards = await sbAll(`cards?select=id,name,set_name,card_number,language,condition,finish,foil,first_edition,quantity,tcgdex_id,ebay_query,set_total,tcg_meta,ebay_checked_at${gradeCols}&order=created_at`);
   log(`${cards.length} Karten.`);
 
   // Sprachwechsel in der App: Verkäufe der alten Suche verwerfen (die App selbst darf nicht löschen).
@@ -169,7 +172,7 @@ async function main() {
       await sb(`cards?id=eq.${c.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ tcg_meta: next }) });
       c.tcg_meta = next;
     }
-    log(`Sprachwechsel: Verkäufe von ${resets.length} Karte(n) verworfen, sie werden neu gesucht.`);
+    log(`Sprach- oder Grading-Wechsel: Verkäufe von ${resets.length} Karte(n) verworfen, sie werden neu gesucht.`);
   }
 
   // Kartenanzahl und Ausführungen von TCGdex nachtragen (kostenlos)

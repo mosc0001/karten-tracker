@@ -48,6 +48,72 @@ const GRADED_TITLE_RX = new RegExp(
     "\\b(psa|bgs|cgc|beckett|gsg|sgc|aog|slab|slabbed|graded|gradata|gradee|bewertet|get graded)\\b",
   ].join("|")
 );
+/* ---------- Grading (PSA, CGC, BGS …) ---------- */
+// Bekannte Prüfdienste: Kürzel und Schreibweisen in eBay-Titeln und im Merkmal "Professional Grader"
+export const GRADERS = [
+  { code: "PSA", label: "PSA", words: ["psa"], field: /psa|professional sports/ },
+  { code: "CGC", label: "CGC", words: ["cgc"], field: /cgc|certified guaranty/ },
+  { code: "BGS", label: "BGS (Beckett)", words: ["bgs", "beckett"], field: /bgs|beckett/ },
+  { code: "SGC", label: "SGC", words: ["sgc"], field: /sgc|sportscard guaranty/ },
+  { code: "TAG", label: "TAG", words: ["tag"], field: /\btag\b|technical authentication/ },
+  { code: "ACE", label: "ACE", words: ["ace"], field: /\bace\b/ },
+  { code: "GMA", label: "GMA", words: ["gma"], field: /\bgma\b/ },
+  { code: "AGS", label: "AGS", words: ["ags"], field: /\bags\b/ },
+  { code: "PCA", label: "PCA", words: ["pca"], field: /\bpca\b/ },
+  { code: "GSG", label: "GSG", words: ["gsg"], field: /\bgsg\b/ },
+  { code: "MNT", label: "MNT", words: ["mnt"], field: /\bmnt\b/ },
+  { code: "HGA", label: "HGA", words: ["hga"], field: /\bhga\b/ },
+];
+// Grade eines Verkaufs für eine bestimmte Karte; bei einem nicht vorgesehenen Prüfdienst (eigene Angabe) neu lesen
+function saleGradeFor(card, sale) {
+  if (sale.gradeKey || !card.grader || GRADERS.some((g) => g.code === card.grader)) return { graded: sale.graded, key: sale.gradeKey };
+  const g = parseGrade(sale.title || "", [card.grader]);
+  return g && g.key ? { graded: true, key: g.key } : { graded: sale.graded, key: null };
+}
+const graderWords = (code) => (GRADERS.find((g) => g.code === code) || { words: [norm(code || "")] }).words.filter(Boolean);
+const LABELS = { pristine: "Pristine", black: "Black Label", perfect: "Perfect" };
+const labelOf = (t) => (/black\s?label/.test(t) ? "black" : /pristine/.test(t) ? "pristine" : /perfect/.test(t) ? "perfect" : null);
+// Einheitlicher Schlüssel für den Vergleich: "PSA 9", "CGC 10 Pristine", "BGS 10 Black Label"
+export function gradeKey(grader, grade, label) {
+  if (!grader || grade == null || grade === "") return null;
+  const g = Number(grade);
+  return `${String(grader).toUpperCase()} ${Number.isInteger(g) ? g : g.toFixed(1)}${label && LABELS[label] ? " " + LABELS[label] : ""}`;
+}
+// Grade aus einem Text lesen. extraCodes: weitere Prüfdienste (eigene Angabe einer Karte, z. B. "MNT")
+// Ergebnis: { grader, grade, label, key } | { uncertain: true } (z. B. "PSA 10 Kandidat") | null
+export function parseGrade(text, extraCodes = []) {
+  const t = norm(text);
+  const list = [...GRADERS, ...extraCodes.filter((c) => c && !GRADERS.some((g) => g.code === c)).map((c) => ({ code: c, words: [norm(c)] }))];
+  const found = [];
+  for (const g of list) {
+    for (const w of g.words) {
+      const rx = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(?:grading|graded)?\\s*[-:#]?\\s*(?:(gem\\s?mint|gem\\s?mt|mint|pristine|black\\s?label|perfect)\\s*)?(10|[1-9](?:[.,]5)?)(?![\\d/.,]\\d)\\b(?:\\s*(pristine|black\\s?label|perfect))?`, "g");
+      for (const m of t.matchAll(rx)) found.push({ grader: g.code, grade: Number(m[2].replace(",", ".")), label: labelOf(`${m[1] || ""} ${m[3] || ""}`) });
+    }
+  }
+  if (!found.length) return null;
+  if (/\b(kandidat|candidate|ready|worthy|potential|possible|moglich|mogliche|anwarter|tauglich|wurdig|chance)\b|\?/.test(t)) return { uncertain: true };
+  const keys = new Set(found.map((f) => gradeKey(f.grader, f.grade, f.label)));
+  if (keys.size > 1) {
+    // gleiche Note mit und ohne Zusatz ("CGC 10 Pristine … CGC 10"): die genauere Angabe gilt
+    const withLabel = found.filter((f) => f.label);
+    const base = new Set(found.map((f) => gradeKey(f.grader, f.grade)));
+    if (base.size === 1 && withLabel.length && new Set(withLabel.map((f) => f.label)).size === 1) return { ...withLabel[0], key: gradeKey(withLabel[0].grader, withLabel[0].grade, withLabel[0].label) };
+    return { uncertain: true, conflict: true };
+  }
+  return { ...found[0], key: [...keys][0] };
+}
+// Grade aus den Merkmalen der Detailseite ("Professional Grader", "Grade", Zustand "Graded - PSA 10")
+function gradeFromFields(sp, condRaw) {
+  const graderTxt = norm(spec(sp, /^(professional grader|professioneller grader|grader|bewertungsfirma|prufdienst|gradingfirma)$/i));
+  const gradeTxt = norm(spec(sp, /^(grade|note|bewertung)$/i));
+  const g = GRADERS.find((x) => graderTxt && x.field.test(graderTxt));
+  const num = gradeTxt.match(/\b(10|[1-9](?:[.,]5)?)\b/);
+  if (g && num) return { grader: g.code, grade: Number(num[1].replace(",", ".")), label: labelOf(gradeTxt) };
+  const fromCond = condRaw ? parseGrade(condRaw) : null;
+  return fromCond && !fromCond.uncertain ? fromCond : null;
+}
+
 const MULTI_TITLE_RX = /\b(trio|big 3|you choose|choose|all \d+|alle \d+|lot|bundle|konvolut|sammlung|set of|\d+x|x\d+)\b/;
 
 /* ---------- Sprache ---------- */
@@ -149,6 +215,18 @@ export function parseSale(row, detail = null) {
     graded = true; gradedReason = "search-condition"; // ohne Detailseite nicht bestätigt: ausschließen
   }
 
+  // Grade (nur für bewertete Verkäufe von Belang)
+  let gradeInfo = null;
+  if (graded) {
+    const fromTitle = parseGrade(title);
+    const fromField = detail ? gradeFromFields(sp, condRaw) : null;
+    if (fromTitle && !fromTitle.uncertain && fromField && gradeKey(fromField.grader, fromField.grade, fromTitle.label || fromField.label) !== fromTitle.key) {
+      gradeInfo = { uncertain: true, conflict: true };
+    } else if (fromTitle && !fromTitle.uncertain) gradeInfo = fromTitle;
+    else if (fromField) gradeInfo = { ...fromField, key: gradeKey(fromField.grader, fromField.grade, fromField.label) };
+    else gradeInfo = fromTitle; // null oder unsicher
+  }
+
   // Zustand
   let stage = null, stageSource = null;
   if (condRaw) {
@@ -225,6 +303,9 @@ export function parseSale(row, detail = null) {
     offerChecked: bestOffer && Boolean(detail),
     hasDetail: Boolean(detail),
     graded, gradedReason,
+    // Grade des Verkaufs: "PSA 9" usw.; null = nicht erkennbar; gradeUncertain bei "PSA 10 Kandidat" oder Widerspruch
+    gradeKey: gradeInfo && gradeInfo.key ? gradeInfo.key : null,
+    gradeUncertain: Boolean(gradeInfo && gradeInfo.uncertain),
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
     stage, stageSource, language, edition, variant, reprint, finish, conflicts,
     image: pickImage(row, detail),
@@ -341,7 +422,9 @@ function check(card, sale) {
   else if (fin) r.finish = fin === card.finish ? "match" : "mismatch";
   else r.finish = only && only === card.finish ? "match" : "unknown";
   // Zustand
-  r.condition = sale.stage ? (sale.stage === card.condition ? "match" : "mismatch") : "unknown";
+  // Bewertete Karte: Statt des Zustands zählt der Grade (Prüfdienst, Note, Zusatz wie Pristine)
+  if (card.graded) { const k = saleGradeFor(card, sale).key; r.condition = k ? (k === card.gradeKey ? "match" : "mismatch") : "unknown"; }
+  else r.condition = sale.stage ? (sale.stage === card.condition ? "match" : "mismatch") : "unknown";
   return r;
 }
 
@@ -353,7 +436,7 @@ function windowStats(sales, now, days) {
 
 export function matchCard(card, sales, opts = {}) {
   const now = opts.now ? new Date(opts.now).getTime() : Date.now();
-  const ex = { graded: 0, multi: 0, variant: 0, conflict: 0, irrelevant: 0, old: 0, other_currency: 0, duplicate: 0, no_date: 0 };
+  const ex = { graded: 0, ungraded: 0, multi: 0, variant: 0, conflict: 0, irrelevant: 0, old: 0, other_currency: 0, duplicate: 0, no_date: 0 };
   const cands = [], conflictList = [], rejected = [];
   const reject = (s, reason) => rejected.push({ sale: s, reason });
 
@@ -373,7 +456,9 @@ export function matchCard(card, sales, opts = {}) {
     if (now - new Date(s.soldAt).getTime() > 365 * DAY) { ex.old++; reject(s, "old"); continue; }
     if (s.currency !== "EUR") { ex.other_currency++; reject(s, "other_currency"); continue; }
     if (!relevant(card, s)) { ex.irrelevant++; reject(s, "irrelevant"); continue; }
-    if (s.graded) { ex.graded++; reject(s, "graded"); continue; }
+    if (card.graded) {
+      if (!saleGradeFor(card, s).graded) { ex.ungraded++; reject(s, "ungraded"); continue; }
+    } else if (s.graded) { ex.graded++; reject(s, "graded"); continue; }
     if (s.multi) { ex.multi++; reject(s, "multi"); continue; }
     if (s.variant === "4th_print" || (s.variant === "shadowless" && !card.firstEdition)) { ex.variant++; reject(s, "variant"); continue; }
     if (s.reprint && !norm(card.setName || "").includes(s.reprint)) { ex.variant++; reject(s, "reprint"); continue; }
@@ -507,13 +592,22 @@ export function numberVariants(number, setTotal) {
 const EXCLUDE = " -PSA -BGS -CGC -GSG -SGC -Beckett -graded -bewertet -slab -lot -bundle";
 
 // Suche 1: Name + Setbegriffe. Findet auch Titel ohne Kartennummer (gemessen gut jeder siebte passende Verkauf).
+// Bewertete Karten: Prüfdienst in die Suche, bewertete Angebote nicht ausschließen
+const EXCLUDE_GRADED = " -lot -bundle -proxy";
+const graderPart = (card) => {
+  if (!card.grader) return "";
+  const w = graderWords(card.grader);
+  return w.length === 1 ? w[0].toUpperCase() : `(${w.join(",")})`;
+};
+const tail = (card) => (card.grader ? EXCLUDE_GRADED : EXCLUDE);
+
 export function buildQuery(card) {
   const jp = card.language === "JP";
   const terms = card.setId && ((jp && JP_SETS[card.setId] && JP_SETS[card.setId].terms) || SET_TERMS[card.setId]);
   // Japanische Setnamen (z. B. ポケモンカード151) stehen nicht in eBay-Titeln: ohne bekannte Begriffe kein Setteil
   const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : (jp ? null : card.setName);
   // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
-  return [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : "", jp ? JP_WORDS : ""].filter(Boolean).join(" ") + EXCLUDE;
+  return [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : "", jp ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Suche 2: Name + Kartennummer. Trifft fast nur die eigene Karte und reicht dadurch viel weiter zurück
@@ -522,14 +616,14 @@ export function buildNumberQuery(card) {
   if (isPromoSet(card.setName, card.setId)) return null;
   const nums = numberVariants(card.number, card.setTotal);
   if (!nums.length) return null;
-  return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : "", card.language === "JP" ? JP_WORDS : ""].filter(Boolean).join(" ") + EXCLUDE;
+  return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : "", card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Automatische Suchbegriffe einer Karte aus der Datenbank (Job und App nutzen dieselben). Beide Suchen laufen,
 // die Ergebnisse werden zusammengeführt; doppelte Treffer erkennt der Job an der Artikelnummer.
 export function autoQueries(c) {
   const card = { name: c.name, setName: c.set_name, setId: setIdOf(c), number: c.card_number, setTotal: c.set_total,
-    finish: c.finish || (c.foil ? "holo" : "non_holo"), language: c.language };
+    finish: c.finish || (c.foil ? "holo" : "non_holo"), language: c.language, grader: c.grader && c.grade != null ? c.grader : null };
   const num = buildNumberQuery(card);
   // Japanische Karte aus einem Set ohne bekannte eBay-Begriffe: nur die Nummernsuche, "Name + japanisch" allein
   // brächte vor allem Verkäufe anderer Karten desselben Pokémon
@@ -561,6 +655,9 @@ export function cardFromRow(c) {
     finish: c.finish || (c.foil ? "holo" : "non_holo"),
     firstEdition: Boolean(c.first_edition),
     variants: meta.variants || null,
+    graded: Boolean(c.grader && c.grade != null),
+    grader: c.grader || null,
+    gradeKey: gradeKey(c.grader, c.grade, c.grade_label),
   };
 }
 
@@ -583,6 +680,12 @@ export function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
   if (!facts.finish) facts.finish = finishFromText(r.title || "");
   if (facts.format === "auction") facts.priceUncertain = false; // ältere Zeilen: Auktionspreis ist echt
+  // Ältere Zeilen (vor der Grading-Erkennung gespeichert): Grade aus dem Titel nachlesen
+  if (facts.graded && facts.gradeKey === undefined) {
+    const g = parseGrade(r.title || "");
+    facts.gradeKey = g && g.key ? g.key : null;
+    facts.gradeUncertain = Boolean(g && g.uncertain);
+  }
   // Von dir in der App gesetzter Zustand (Spalte stage_override) hat Vorrang vor der automatischen Erkennung
   if (STAGES.includes(r.stage_override)) {
     facts.stageAuto = facts.stage ?? null;
@@ -606,12 +709,20 @@ export function triage(card, sale) {
   if (!sale.soldAt || sale.currency !== "EUR") return "drop";
   if (!relevant(card, sale)) return "drop";
   if (sale.multi) return "drop";
-  if (sale.graded && sale.gradedReason !== "search-condition") return "drop";
+  if (card.graded) {
+    if (!saleGradeFor(card, sale).graded) return "drop";
+  } else if (sale.graded && sale.gradedReason !== "search-condition") return "drop";
   if (sale.variant === "4th_print" || (sale.variant === "shadowless" && !card.firstEdition)) return "drop";
   if (sale.reprint && !norm(card.setName || "").includes(sale.reprint)) return "drop";
   if (sale.conflicts.length) return "drop";
   const c = check(card, sale);
   if (c.language === "mismatch" || c.edition === "mismatch" || c.finish === "mismatch") return "drop";
+  if (card.graded) {
+    // anderer Grade: für die Tabelle "Preise nach Grade" speichern, Detailseite unnötig
+    if (c.condition === "mismatch" || sale.hasDetail) return "ok";
+    return c.condition === "unknown" || c.language === "unknown" || c.finish === "unknown" || c.finish === "unproven" ||
+      (card.firstEdition && c.edition !== "match") ? "detail" : "ok";
+  }
   if (c.condition === "mismatch" && sale.stageSource === "title") return "drop";
   if (sale.hasDetail) return "ok";
   if (sale.priceUncertain) return "detail"; // Preisvorschlag: nur die Detailseite nennt den gezahlten Betrag
