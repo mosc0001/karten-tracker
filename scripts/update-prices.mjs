@@ -69,7 +69,7 @@ async function worker() {
   while (queue.length) {
     const c = queue.shift();
     try {
-      const t = await tcgCard(c.language.toLowerCase(), c.tcgdex_id);
+      const t = await tcgCard(c.language === "JP" ? "ja" : c.language.toLowerCase(), c.tcgdex_id); // TCGdex: Japanisch = "ja"
       const f = priceFields(t, c.foil);
       if (!f) {
         noPrice++;

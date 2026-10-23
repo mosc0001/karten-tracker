@@ -69,7 +69,7 @@ function langFromTitle(title) {
   if (/\b(ita|italiano|italian|italiana|italienisch|edizione|prima edizione|carta|rara)\b|\bset base\b|\b\d+ ?ps\b/.test(t)) hits.add("IT");
   if (/\b(francais|french|franzosisch)\b/.test(t)) hits.add("FR");
   if (/\b(espanol|spanish|spanisch)\b/.test(t)) hits.add("ES");
-  if (/\b(japanese|japanisch|japan|jpn|jap)\b/.test(t)) hits.add("JP");
+  if (/\b(japanese|japanisch|japan|jpn|jap|japon|japones|giapponese)\b/.test(t) || /\bJP\b/.test(title) || /[\u3040-\u30ff]/.test(title)) hits.add("JP");
   if (/\b(english|englisch)\b/.test(title.toLowerCase()) || /\bENG?\b/.test(title)) hits.add("EN");
   return hits.size === 1 ? [...hits][0] : null;
 }
@@ -233,7 +233,7 @@ export function parseSale(row, detail = null) {
 
 /* ========================================================================
    matchCard: passende Verkäufe für eine Karte finden und auswerten
-   card = { name, number, setTotal?, language: 'DE'|'EN', condition: 'NM'|'LP'|'MP'|'HP',
+   card = { name, number, setTotal?, language: 'DE'|'EN'|'JP', condition: 'NM'|'LP'|'MP'|'HP',
             finish: 'non_holo'|'holo'|'reverse_holo', firstEdition: boolean, variants?: {normal,holo,reverse} }
    ======================================================================== */
 function median(a) {
@@ -274,6 +274,9 @@ function looseNumbers(card, t) {
 // Gehört der Verkauf zu genau dieser Karte? Nummern mit Buchstaben (H3/H32) sind eine andere Karte als 3/147.
 function relevant(card, sale) {
   const t = norm(sale.title);
+  // Alte japanische Karten (bis Neo) haben keine aufgedruckte Nummer. "x/y" im Titel meint dann meist die
+  // englische Entsprechung; zur Karte passt ein Verkauf hier über Namen und Set (die Suche enthält die Setbegriffe).
+  if (card.language === "JP" && !card.number) return nameIn(card, t);
   const want = parseNumber(card.number);
   const toks = numberTokens(sale.title);
   if (toks.length) return ownNumberIn(card, toks);
@@ -324,7 +327,8 @@ function check(card, sale) {
   if (sale.language) r.language = sale.language === card.language ? "match" : "mismatch";
   else {
     const nameHit = norm(sale.title).includes(norm(card.name));
-    r.language = card.language === "EN" || nameHit ? "assumed" : "unknown";
+    // Japanische Karten tragen den englischen Namen; ein Namenstreffer sagt dort nichts über die Sprache
+    r.language = card.language === "EN" || (nameHit && card.language !== "JP") ? "assumed" : "unknown";
   }
   // Edition
   if (card.firstEdition) r.edition = sale.edition === "1st" ? "match" : sale.edition === "unlimited" ? "mismatch" : "unknown";
@@ -451,13 +455,44 @@ export const SET_TERMS = {
   ecard3: ["Skyridge"],
 };
 
+// Japanische Sets: englische Bezeichnung, Begriffe in eBay-Titeln, ob Kartennummern aufgedruckt sind.
+// Schlüssel ist die TCGdex-Kennung der japanischen Sets (anders als bei den englischen, außer Neo).
+export const JP_SETS = {
+  PMCG1: { en: "Base Set (Expansion Pack)", terms: ["Base", "Expansion", "Basis", "Grundset"], noNumber: true },
+  PMCG2: { en: "Jungle", terms: ["Jungle", "Dschungel"], noNumber: true },
+  PMCG3: { en: "Fossil (Mystery of the Fossils)", terms: ["Fossil"], noNumber: true },
+  PMCG4: { en: "Team Rocket (Rocket Gang)", terms: ["Rocket"], noNumber: true },
+  PMCG5: { en: "Gym Heroes (Leaders' Stadium)", terms: ["Gym", "Leaders", "Stadium", "Heroes"], noNumber: true },
+  PMCG6: { en: "Gym Challenge (Challenge from the Darkness)", terms: ["Gym", "Challenge", "Darkness"], noNumber: true },
+  neo1: { en: "Neo Genesis (Gold, Silver, to a New World)", terms: ["Genesis"], noNumber: true },
+  neo2: { en: "Neo Discovery (Crossing the Ruins)", terms: ["Discovery"], noNumber: true },
+  neo3: { en: "Neo Revelation (Awakening Legends)", terms: ["Revelation"], noNumber: true },
+  neo4: { en: "Neo Destiny (Darkness, and to Light)", terms: ["Destiny"], noNumber: true },
+  E1: { en: "Base Expansion Pack (e-Series 1)", terms: ["Expedition", "Expansion", "ecard", "e-card"] },
+  E2: { en: "The Town on No Map (e-Series 2)", terms: ["Aquapolis", "Town", "ecard", "e-card"] },
+  E3: { en: "Wind from the Sea (e-Series 3)", terms: ["Aquapolis", "Wind", "ecard", "e-card"] },
+  E4: { en: "Split Earth (e-Series 4)", terms: ["Skyridge", "Split", "ecard", "e-card"] },
+  E5: { en: "Mysterious Mountains (e-Series 5)", terms: ["Skyridge", "Mysterious", "ecard", "e-card"] },
+  VS1: { en: "Pokémon VS", terms: ["VS"] },
+  web1: { en: "Pokémon Web", terms: ["Web"] },
+  SM12a: { en: "Tag All Stars (SM12a)", terms: ["sm12a", "Allstars", "Stars"] },
+  S4a: { en: "Shiny Star V (S4a)", terms: ["s4a", "Shiny"] },
+  S8b: { en: "VMAX Climax (S8b)", terms: ["Climax", "s8b"] },
+  S12a: { en: "VSTAR Universe (S12a)", terms: ["Universe", "s12a"] },
+  SV2a: { en: "Pokémon Card 151 (SV2a)", terms: ["151", "sv2a"] },
+  SV4a: { en: "Shiny Treasure ex (SV4a)", terms: ["sv4a", "Treasure"] },
+  SV8a: { en: "Terastal Festival ex (SV8a)", terms: ["Terastal", "sv8a"] },
+};
+// Japanisch in eBay-Titeln (eBays Oder-Schreibweise)
+const JP_WORDS = "(japanese,japanisch,japan,jpn,jp,jap)";
+
 export function setIdOf(c) {
   return (c.tcg_meta && c.tcg_meta.setId) || (c.tcgdex_id ? String(c.tcgdex_id).replace(/-[^-]+$/, "") : null);
 }
 
 // Promo-Sets: Auf den Karten steht keine Setgröße, Verkäufer schreiben "Promo 4" oder "#4", nie "4/53"
 const PROMO_SETS = new Set(["basep", "np", "dpp", "hgssp", "bwp", "xyp", "smp", "swshp", "svp"]);
-export const isPromoSet = (setName, setId) => /promo/i.test(setName || "") || PROMO_SETS.has(setId || "");
+export const isPromoSet = (setName, setId) => /promo/i.test(setName || "") || PROMO_SETS.has(setId || "") || /^[a-z]{1,3}-p$/i.test(setId || ""); // japanisch: SV-P, S-P, SM-P
 
 // Schreibweisen der Kartennummer, wie Verkäufer sie in Titel schreiben: 6/62, 06/62, 006/062
 export function numberVariants(number, setTotal) {
@@ -473,10 +508,12 @@ const EXCLUDE = " -PSA -BGS -CGC -GSG -SGC -Beckett -graded -bewertet -slab -lot
 
 // Suche 1: Name + Setbegriffe. Findet auch Titel ohne Kartennummer (gemessen gut jeder siebte passende Verkauf).
 export function buildQuery(card) {
-  const terms = card.setId && SET_TERMS[card.setId];
-  const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : card.setName;
+  const jp = card.language === "JP";
+  const terms = card.setId && ((jp && JP_SETS[card.setId] && JP_SETS[card.setId].terms) || SET_TERMS[card.setId]);
+  // Japanische Setnamen (z. B. ポケモンカード151) stehen nicht in eBay-Titeln: ohne bekannte Begriffe kein Setteil
+  const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : (jp ? null : card.setName);
   // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
-  return [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : ""].filter(Boolean).join(" ") + EXCLUDE;
+  return [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : "", jp ? JP_WORDS : ""].filter(Boolean).join(" ") + EXCLUDE;
 }
 
 // Suche 2: Name + Kartennummer. Trifft fast nur die eigene Karte und reicht dadurch viel weiter zurück
@@ -485,15 +522,19 @@ export function buildNumberQuery(card) {
   if (isPromoSet(card.setName, card.setId)) return null;
   const nums = numberVariants(card.number, card.setTotal);
   if (!nums.length) return null;
-  return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : ""].filter(Boolean).join(" ") + EXCLUDE;
+  return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : "", card.language === "JP" ? JP_WORDS : ""].filter(Boolean).join(" ") + EXCLUDE;
 }
 
 // Automatische Suchbegriffe einer Karte aus der Datenbank (Job und App nutzen dieselben). Beide Suchen laufen,
 // die Ergebnisse werden zusammengeführt; doppelte Treffer erkennt der Job an der Artikelnummer.
 export function autoQueries(c) {
   const card = { name: c.name, setName: c.set_name, setId: setIdOf(c), number: c.card_number, setTotal: c.set_total,
-    finish: c.finish || (c.foil ? "holo" : "non_holo") };
-  return [buildQuery(card), buildNumberQuery(card)].filter(Boolean);
+    finish: c.finish || (c.foil ? "holo" : "non_holo"), language: c.language };
+  const num = buildNumberQuery(card);
+  // Japanische Karte aus einem Set ohne bekannte eBay-Begriffe: nur die Nummernsuche, "Name + japanisch" allein
+  // brächte vor allem Verkäufe anderer Karten desselben Pokémon
+  if (card.language === "JP" && num && !(JP_SETS[card.setId] || SET_TERMS[card.setId])) return [num];
+  return [buildQuery(card), num].filter(Boolean);
 }
 export const autoQuery = (c) => autoQueries(c)[0];
 

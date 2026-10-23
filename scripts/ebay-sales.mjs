@@ -176,7 +176,7 @@ async function main() {
   const needMeta = cards.filter((c) => c.tcgdex_id && (!c.tcg_meta || !("setId" in c.tcg_meta))).slice(0, 80);
   await pool(4, needMeta, async (c) => {
     try {
-      const res = await fetch(`https://api.tcgdex.net/v2/${c.language.toLowerCase()}/cards/${encodeURIComponent(c.tcgdex_id)}`);
+      const res = await fetch(`https://api.tcgdex.net/v2/${c.language === "JP" ? "ja" : c.language.toLowerCase()}/cards/${encodeURIComponent(c.tcgdex_id)}`);
       if (!res.ok) return;
       const t = await res.json();
       const patch = {
