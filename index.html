@@ -492,7 +492,8 @@ const UNGRADED_RX = /ungraded|nicht bewertet|non gradat|non gradee|non grade|sin
 const GRADED_COND_RX = /^(graded|bewertet|gradata|gradee|calificad|gegradeerd)/;
 const GRADED_TITLE_RX = new RegExp(
   [
-    "\\b(psa|bgs|cgc|gsg|sgc|tag|ace|aog|mnt|hga|pca|gma|gg)\\s?-?\\s?\\d",
+    // "gg" nur mit Abstand: "GG05" ist eine Kartennummer (Galarian Gallery), kein Prüfdienst
+    "\\b(psa|bgs|cgc|gsg|sgc|tag|ace|aog|mnt|hga|pca|gma)\\s?-?\\s?\\d|\\bgg\\s-?\\s?\\d",
     "\\b(psa|bgs|cgc|beckett|gsg|sgc|aog|slab|slabbed|graded|gradata|gradee|bewertet|get graded)\\b",
   ].join("|")
 );
@@ -986,6 +987,8 @@ const SET_TERMS = {
   ecard1: ["Expedition"],
   ecard2: ["Aquapolis"],
   ecard3: ["Skyridge"],
+  "swsh12.5": ["Zenith", "Zenit", "CRZ"],
+  "swsh12.5gg": ["Zenith", "Zenit", "CRZ"],
 };
 
 // Japanische Sets: englische Bezeichnung, Begriffe in eBay-Titeln, ob Kartennummern aufgedruckt sind.
@@ -1062,7 +1065,14 @@ function buildQuery(card) {
 // (getestet: Haunter Fossil, 60 Treffer = 71 statt 33 Tage). Nicht für Promos und Nummern mit Buchstaben.
 function buildNumberQuery(card) {
   if (isPromoSet(card.setName, card.setId)) return null;
-  const nums = numberVariants(card.number, card.setTotal);
+  let nums = numberVariants(card.number, card.setTotal);
+  // Nummern mit Buchstaben aus Sondersets (Galarian Gallery GG05, Trainer Gallery TG12, Radiant Collection RC5):
+  // Verkäufer schreiben sie meist allein ("GG05") oder mit Setgröße ("GG05/GG70")
+  const pm = String(card.number || "").trim().match(/^([A-Za-z]{2,3})0*(\d{1,3})$/);
+  if (!nums.length && pm && !/^(h|sv)$/i.test(pm[1])) {
+    const pre = pm[1].toUpperCase(), n = pm[2];
+    nums = [...new Set([`${pre}${n.padStart(2, "0")}`, `${pre}${n}`])];
+  }
   if (!nums.length) return null;
   return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : "", card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
@@ -2451,22 +2461,35 @@ function openAdd() {
   async function search() {
     const raw = $("#q", sheet).value.trim();
     s.enHint = null;
-    const num = raw.match(/(\d+)\s*\/\s*(\d+)/);
-    if (num) return searchByNumber(num[1], Number(num[2]), raw.replace(num[0], "").trim());
+    // "6/105", aber auch Nummern mit Buchstaben wie "GG05/GG70" (Galarian Gallery), "TG12/TG30", "RC5/RC32"
+    const num = raw.match(/\b([A-Za-z]{0,4}\d{1,3})\s*\/\s*[A-Za-z]{0,4}(\d{1,3})\b/);
+    if (num) return searchByNumber(num[1].toUpperCase(), Number(num[2]), raw.replace(num[0], "").trim());
+    // "Lapras GG05": Name plus Nummer ohne Setgröße, Treffer nach der Nummer filtern
+    const loose = raw.match(/^(.*\S)\s+#?([A-Za-z]{0,4}\d{1,3})$/);
+    const nameQ = loose && /[A-Za-zÄÖÜäöüß]{2}/.test(loose[1]) ? loose[1] : raw;
+    const numQ = loose && nameQ !== raw ? loose[2] : null;
     if (raw.length < 2) return;
     res.innerHTML = `<p class="muted">Suche läuft …</p>`;
     if (isJP()) return searchJapanese(raw);
     try {
-      const [list, sets] = await Promise.all([
-        tcg(`${lang()}/cards?name=${encodeURIComponent(raw)}&pagination:page=1&pagination:itemsPerPage=40`),
+      let [list, sets] = await Promise.all([
+        tcg(`${lang()}/cards?name=${encodeURIComponent(nameQ)}&pagination:page=1&pagination:itemsPerPage=250`),
         setsFor(lang()).catch(() => [])
       ]);
+      if (numQ) {
+        const hit = list.filter(c => numKey(c.localId) === numKey(numQ));
+        if (hit.length) list = hit;
+      }
       if (!list.length) {
         res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, die Kartennummer (z. B. 6/105) oder die andere Sprache.</p>`;
         return;
       }
       const byId = new Map(sets.map(x => [x.id, x.name]));
-      showResults(list.map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })));
+      // neueste Sets zuerst (Reihenfolge der TCGdex-Setliste), Sondersets wie Galarian Gallery beim Hauptset
+      const order = new Map(sets.map((x, i) => [x.id, i]));
+      list.sort((a, b) => (order.get(setIdFromCardId(b.id, b.localId)) ?? -1) - (order.get(setIdFromCardId(a.id, a.localId)) ?? -1));
+      showResults(list.slice(0, 120).map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })),
+        list.length > 120 ? `${list.length} Karten gefunden, die neuesten 120. Mit Nummer geht es schneller, z. B. „${nameQ} GG05“ oder „GG05/GG70“.` : "");
     } catch (e) {
       res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
     }
@@ -2537,14 +2560,19 @@ function openAdd() {
     res.innerHTML = `<p class="muted">Suche nach Nr. ${esc(localNum)}/${official} …</p>`;
     try {
       const found = await findByNumber(localNum, official);
+      const nf = norm(nameFilter);
+      const list = found ? (nf ? found.filter(c => norm(c.name).includes(nf)) : found) : [];
+      if (!list.length && nameFilter && !isJP()) {
+        // z. B. Tippfehler bei der Setgröße: über Name und Nummer weitersuchen
+        $("#q", sheet).value = `${nameFilter} ${localNum}`;
+        return search();
+      }
       if (!found) {
-        res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache.</p>`;
+        res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache, oder suche mit Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`;
         return;
       }
-      const nf = norm(nameFilter);
-      const list = nf ? found.filter(c => norm(c.name).includes(nf)) : found;
       if (!list.length) {
-        res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden.</p>`;
+        res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden. Versuche Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`;
         return;
       }
       showResults(list);
