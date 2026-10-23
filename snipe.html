@@ -925,20 +925,36 @@ function openAdd() {
     res.querySelectorAll(".pick").forEach(b => b.onclick = () => pick(b.dataset.id));
   }
 
+  // Nummernvergleich ohne führende Nullen: "GG05" = "GG5", "006" = "6"
+  const numKey = x => String(x ?? "").trim().toUpperCase().replace(/^([A-Z]*)0*(\d)/, "$1$2");
+
   async function search() {
     const raw = $("#q", sheet).value.trim();
-    const num = raw.match(/(\d+)\s*\/\s*(\d+)/);
-    if (num) return searchByNumber(num[1], Number(num[2]), raw.replace(num[0], "").trim());
+    // "202/165", aber auch Nummern mit Buchstaben wie "GG05/GG70" (Galarian Gallery), "TG12/TG30", "RC5/RC32"
+    const num = raw.match(/\b([A-Za-z]{0,4}\d{1,3})\s*\/\s*[A-Za-z]{0,4}(\d{1,3})\b/);
+    if (num) return searchByNumber(num[1].toUpperCase(), Number(num[2]), raw.replace(num[0], "").trim());
+    // "Lapras GG05": Name plus Nummer ohne Setgröße, Treffer nach der Nummer filtern
+    const loose = raw.match(/^(.*\S)\s+#?([A-Za-z]{0,4}\d{1,3})$/);
+    const nameQ = loose && /[A-Za-zÄÖÜäöüß]{2}/.test(loose[1]) ? loose[1] : raw;
+    const numQ = loose && nameQ !== raw ? loose[2] : null;
     if (raw.length < 2) return;
     res.innerHTML = `<p class="muted">Suche läuft …</p>`;
     try {
-      const [list, sets] = await Promise.all([
-        tcg(`${s.lang}/cards?name=${encodeURIComponent(raw)}&pagination:page=1&pagination:itemsPerPage=40`),
+      let [list, sets] = await Promise.all([
+        tcg(`${s.lang}/cards?name=${encodeURIComponent(nameQ)}&pagination:page=1&pagination:itemsPerPage=250`),
         setsFor(s.lang).catch(() => [])
       ]);
-      if (!list.length) { res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, die Nummer (z. B. 202/165) oder die andere Sprache.</p>`; return; }
+      if (numQ) {
+        const hit = list.filter(c => numKey(c.localId) === numKey(numQ));
+        if (hit.length) list = hit;
+      }
+      if (!list.length) { res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, die Nummer (z. B. 202/165 oder GG05/GG70) oder die andere Sprache.</p>`; return; }
       const byId = new Map(sets.map(x => [x.id, x.name]));
-      showResults(list.map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })));
+      // neueste Sets zuerst (Reihenfolge der TCGdex-Setliste)
+      const order = new Map(sets.map((x, i) => [x.id, i]));
+      list.sort((a, b) => (order.get(setIdFromCardId(b.id, b.localId)) ?? -1) - (order.get(setIdFromCardId(a.id, a.localId)) ?? -1));
+      showResults(list.slice(0, 120).map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })),
+        list.length > 120 ? `${list.length} Karten gefunden, die neuesten 120. Mit Nummer geht es schneller, z. B. „${esc(nameQ)} GG05“ oder „GG05/GG70“.` : "");
     } catch (e) { res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`; }
   }
 
@@ -948,7 +964,10 @@ function openAdd() {
     try {
       const sets = await setsFor(s.lang);
       const cands = sets.filter(x => x.cardCount && Number(x.cardCount.official) === official).slice(0, 12);
-      if (!cands.length) { res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache.</p>`; return; }
+      if (!cands.length) {
+        if (nameFilter) { $("#q", sheet).value = `${nameFilter} ${localNum}`; return search(); } // z. B. Tippfehler bei der Setgröße
+        res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache, oder suche mit Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`; return;
+      }
       const variants = [...new Set([localNum, localNum.replace(/^0+(?=\d)/, ""), localNum.padStart(3, "0")])];
       const found = [];
       for (const set of cands) {
@@ -961,7 +980,10 @@ function openAdd() {
       }
       const nf = norm(nameFilter);
       const list = nf ? found.filter(c => norm(c.name).includes(nf)) : found;
-      if (!list.length) { res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden.</p>`; return; }
+      if (!list.length) {
+        if (nameFilter) { $("#q", sheet).value = `${nameFilter} ${localNum}`; return search(); }
+        res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden. Versuche Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`; return;
+      }
       showResults(list);
     } catch (e) { res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`; }
   }
