@@ -205,6 +205,14 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
 .tag{background:var(--fill);border-radius:5px;padding:1px 6px;font-size:12px;font-weight:500;color:var(--muted)}
 .tag.foil{background:linear-gradient(115deg,#7ad0ff55,#b69cff55,#ff9fcb55,#ffd97955);color:var(--ink)}
 .tag.first{background:var(--tint);color:var(--accent)}
+.tag.graded{background:linear-gradient(180deg,#e9edf3,#c9d1dc);color:#111;font-weight:600}
+@media (prefers-color-scheme:dark){.tag.graded{background:linear-gradient(180deg,#f2f4f7,#b9c2cf);color:#000}}
+.gradebox{margin-top:14px}
+.gradebox .seg{max-width:340px;margin:0}
+.gfields{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.gfields .gcert,.gfields .gnote,#gotherl{grid-column:1/-1}
+.gnote{display:block;margin-top:8px;font-size:12px}
+@media (min-width:600px){.gfields{grid-template-columns:1.2fr .7fr 1fr}.gfields .gcert{grid-column:auto}}
 .price{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:16px}
 .price small{display:block;font-weight:400;color:var(--muted);font-size:12px}
 /* Am Rechner: Spalten wie in einer Mac-Liste (Karte | Merkmale | Wert) */
@@ -488,6 +496,72 @@ const GRADED_TITLE_RX = new RegExp(
     "\\b(psa|bgs|cgc|beckett|gsg|sgc|aog|slab|slabbed|graded|gradata|gradee|bewertet|get graded)\\b",
   ].join("|")
 );
+/* ---------- Grading (PSA, CGC, BGS …) ---------- */
+// Bekannte Prüfdienste: Kürzel und Schreibweisen in eBay-Titeln und im Merkmal "Professional Grader"
+const GRADERS = [
+  { code: "PSA", label: "PSA", words: ["psa"], field: /psa|professional sports/ },
+  { code: "CGC", label: "CGC", words: ["cgc"], field: /cgc|certified guaranty/ },
+  { code: "BGS", label: "BGS (Beckett)", words: ["bgs", "beckett"], field: /bgs|beckett/ },
+  { code: "SGC", label: "SGC", words: ["sgc"], field: /sgc|sportscard guaranty/ },
+  { code: "TAG", label: "TAG", words: ["tag"], field: /\btag\b|technical authentication/ },
+  { code: "ACE", label: "ACE", words: ["ace"], field: /\bace\b/ },
+  { code: "GMA", label: "GMA", words: ["gma"], field: /\bgma\b/ },
+  { code: "AGS", label: "AGS", words: ["ags"], field: /\bags\b/ },
+  { code: "PCA", label: "PCA", words: ["pca"], field: /\bpca\b/ },
+  { code: "GSG", label: "GSG", words: ["gsg"], field: /\bgsg\b/ },
+  { code: "MNT", label: "MNT", words: ["mnt"], field: /\bmnt\b/ },
+  { code: "HGA", label: "HGA", words: ["hga"], field: /\bhga\b/ },
+];
+// Grade eines Verkaufs für eine bestimmte Karte; bei einem nicht vorgesehenen Prüfdienst (eigene Angabe) neu lesen
+function saleGradeFor(card, sale) {
+  if (sale.gradeKey || !card.grader || GRADERS.some((g) => g.code === card.grader)) return { graded: sale.graded, key: sale.gradeKey };
+  const g = parseGrade(sale.title || "", [card.grader]);
+  return g && g.key ? { graded: true, key: g.key } : { graded: sale.graded, key: null };
+}
+const graderWords = (code) => (GRADERS.find((g) => g.code === code) || { words: [norm(code || "")] }).words.filter(Boolean);
+const LABELS = { pristine: "Pristine", black: "Black Label", perfect: "Perfect" };
+const labelOf = (t) => (/black\s?label/.test(t) ? "black" : /pristine/.test(t) ? "pristine" : /perfect/.test(t) ? "perfect" : null);
+// Einheitlicher Schlüssel für den Vergleich: "PSA 9", "CGC 10 Pristine", "BGS 10 Black Label"
+function gradeKey(grader, grade, label) {
+  if (!grader || grade == null || grade === "") return null;
+  const g = Number(grade);
+  return `${String(grader).toUpperCase()} ${Number.isInteger(g) ? g : g.toFixed(1)}${label && LABELS[label] ? " " + LABELS[label] : ""}`;
+}
+// Grade aus einem Text lesen. extraCodes: weitere Prüfdienste (eigene Angabe einer Karte, z. B. "MNT")
+// Ergebnis: { grader, grade, label, key } | { uncertain: true } (z. B. "PSA 10 Kandidat") | null
+function parseGrade(text, extraCodes = []) {
+  const t = norm(text);
+  const list = [...GRADERS, ...extraCodes.filter((c) => c && !GRADERS.some((g) => g.code === c)).map((c) => ({ code: c, words: [norm(c)] }))];
+  const found = [];
+  for (const g of list) {
+    for (const w of g.words) {
+      const rx = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(?:grading|graded)?\\s*[-:#]?\\s*(?:(gem\\s?mint|gem\\s?mt|mint|pristine|black\\s?label|perfect)\\s*)?(10|[1-9](?:[.,]5)?)(?![\\d/.,]\\d)\\b(?:\\s*(pristine|black\\s?label|perfect))?`, "g");
+      for (const m of t.matchAll(rx)) found.push({ grader: g.code, grade: Number(m[2].replace(",", ".")), label: labelOf(`${m[1] || ""} ${m[3] || ""}`) });
+    }
+  }
+  if (!found.length) return null;
+  if (/\b(kandidat|candidate|ready|worthy|potential|possible|moglich|mogliche|anwarter|tauglich|wurdig|chance)\b|\?/.test(t)) return { uncertain: true };
+  const keys = new Set(found.map((f) => gradeKey(f.grader, f.grade, f.label)));
+  if (keys.size > 1) {
+    // gleiche Note mit und ohne Zusatz ("CGC 10 Pristine … CGC 10"): die genauere Angabe gilt
+    const withLabel = found.filter((f) => f.label);
+    const base = new Set(found.map((f) => gradeKey(f.grader, f.grade)));
+    if (base.size === 1 && withLabel.length && new Set(withLabel.map((f) => f.label)).size === 1) return { ...withLabel[0], key: gradeKey(withLabel[0].grader, withLabel[0].grade, withLabel[0].label) };
+    return { uncertain: true, conflict: true };
+  }
+  return { ...found[0], key: [...keys][0] };
+}
+// Grade aus den Merkmalen der Detailseite ("Professional Grader", "Grade", Zustand "Graded - PSA 10")
+function gradeFromFields(sp, condRaw) {
+  const graderTxt = norm(spec(sp, /^(professional grader|professioneller grader|grader|bewertungsfirma|prufdienst|gradingfirma)$/i));
+  const gradeTxt = norm(spec(sp, /^(grade|note|bewertung)$/i));
+  const g = GRADERS.find((x) => graderTxt && x.field.test(graderTxt));
+  const num = gradeTxt.match(/\b(10|[1-9](?:[.,]5)?)\b/);
+  if (g && num) return { grader: g.code, grade: Number(num[1].replace(",", ".")), label: labelOf(gradeTxt) };
+  const fromCond = condRaw ? parseGrade(condRaw) : null;
+  return fromCond && !fromCond.uncertain ? fromCond : null;
+}
+
 const MULTI_TITLE_RX = /\b(trio|big 3|you choose|choose|all \d+|alle \d+|lot|bundle|konvolut|sammlung|set of|\d+x|x\d+)\b/;
 
 /* ---------- Sprache ---------- */
@@ -589,6 +663,18 @@ function parseSale(row, detail = null) {
     graded = true; gradedReason = "search-condition"; // ohne Detailseite nicht bestätigt: ausschließen
   }
 
+  // Grade (nur für bewertete Verkäufe von Belang)
+  let gradeInfo = null;
+  if (graded) {
+    const fromTitle = parseGrade(title);
+    const fromField = detail ? gradeFromFields(sp, condRaw) : null;
+    if (fromTitle && !fromTitle.uncertain && fromField && gradeKey(fromField.grader, fromField.grade, fromTitle.label || fromField.label) !== fromTitle.key) {
+      gradeInfo = { uncertain: true, conflict: true };
+    } else if (fromTitle && !fromTitle.uncertain) gradeInfo = fromTitle;
+    else if (fromField) gradeInfo = { ...fromField, key: gradeKey(fromField.grader, fromField.grade, fromField.label) };
+    else gradeInfo = fromTitle; // null oder unsicher
+  }
+
   // Zustand
   let stage = null, stageSource = null;
   if (condRaw) {
@@ -665,6 +751,9 @@ function parseSale(row, detail = null) {
     offerChecked: bestOffer && Boolean(detail),
     hasDetail: Boolean(detail),
     graded, gradedReason,
+    // Grade des Verkaufs: "PSA 9" usw.; null = nicht erkennbar; gradeUncertain bei "PSA 10 Kandidat" oder Widerspruch
+    gradeKey: gradeInfo && gradeInfo.key ? gradeInfo.key : null,
+    gradeUncertain: Boolean(gradeInfo && gradeInfo.uncertain),
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
     stage, stageSource, language, edition, variant, reprint, finish, conflicts,
     image: pickImage(row, detail),
@@ -781,7 +870,9 @@ function check(card, sale) {
   else if (fin) r.finish = fin === card.finish ? "match" : "mismatch";
   else r.finish = only && only === card.finish ? "match" : "unknown";
   // Zustand
-  r.condition = sale.stage ? (sale.stage === card.condition ? "match" : "mismatch") : "unknown";
+  // Bewertete Karte: Statt des Zustands zählt der Grade (Prüfdienst, Note, Zusatz wie Pristine)
+  if (card.graded) { const k = saleGradeFor(card, sale).key; r.condition = k ? (k === card.gradeKey ? "match" : "mismatch") : "unknown"; }
+  else r.condition = sale.stage ? (sale.stage === card.condition ? "match" : "mismatch") : "unknown";
   return r;
 }
 
@@ -793,7 +884,7 @@ function windowStats(sales, now, days) {
 
 function matchCard(card, sales, opts = {}) {
   const now = opts.now ? new Date(opts.now).getTime() : Date.now();
-  const ex = { graded: 0, multi: 0, variant: 0, conflict: 0, irrelevant: 0, old: 0, other_currency: 0, duplicate: 0, no_date: 0 };
+  const ex = { graded: 0, ungraded: 0, multi: 0, variant: 0, conflict: 0, irrelevant: 0, old: 0, other_currency: 0, duplicate: 0, no_date: 0 };
   const cands = [], conflictList = [], rejected = [];
   const reject = (s, reason) => rejected.push({ sale: s, reason });
 
@@ -813,7 +904,9 @@ function matchCard(card, sales, opts = {}) {
     if (now - new Date(s.soldAt).getTime() > 365 * DAY) { ex.old++; reject(s, "old"); continue; }
     if (s.currency !== "EUR") { ex.other_currency++; reject(s, "other_currency"); continue; }
     if (!relevant(card, s)) { ex.irrelevant++; reject(s, "irrelevant"); continue; }
-    if (s.graded) { ex.graded++; reject(s, "graded"); continue; }
+    if (card.graded) {
+      if (!saleGradeFor(card, s).graded) { ex.ungraded++; reject(s, "ungraded"); continue; }
+    } else if (s.graded) { ex.graded++; reject(s, "graded"); continue; }
     if (s.multi) { ex.multi++; reject(s, "multi"); continue; }
     if (s.variant === "4th_print" || (s.variant === "shadowless" && !card.firstEdition)) { ex.variant++; reject(s, "variant"); continue; }
     if (s.reprint && !norm(card.setName || "").includes(s.reprint)) { ex.variant++; reject(s, "reprint"); continue; }
@@ -947,13 +1040,22 @@ function numberVariants(number, setTotal) {
 const EXCLUDE = " -PSA -BGS -CGC -GSG -SGC -Beckett -graded -bewertet -slab -lot -bundle";
 
 // Suche 1: Name + Setbegriffe. Findet auch Titel ohne Kartennummer (gemessen gut jeder siebte passende Verkauf).
+// Bewertete Karten: Prüfdienst in die Suche, bewertete Angebote nicht ausschließen
+const EXCLUDE_GRADED = " -lot -bundle -proxy";
+const graderPart = (card) => {
+  if (!card.grader) return "";
+  const w = graderWords(card.grader);
+  return w.length === 1 ? w[0].toUpperCase() : `(${w.join(",")})`;
+};
+const tail = (card) => (card.grader ? EXCLUDE_GRADED : EXCLUDE);
+
 function buildQuery(card) {
   const jp = card.language === "JP";
   const terms = card.setId && ((jp && JP_SETS[card.setId] && JP_SETS[card.setId].terms) || SET_TERMS[card.setId]);
   // Japanische Setnamen (z. B. ポケモンカード151) stehen nicht in eBay-Titeln: ohne bekannte Begriffe kein Setteil
   const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : (jp ? null : card.setName);
   // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
-  return [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : "", jp ? JP_WORDS : ""].filter(Boolean).join(" ") + EXCLUDE;
+  return [card.name, setPart, card.finish === "reverse_holo" ? "reverse" : "", jp ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Suche 2: Name + Kartennummer. Trifft fast nur die eigene Karte und reicht dadurch viel weiter zurück
@@ -962,14 +1064,14 @@ function buildNumberQuery(card) {
   if (isPromoSet(card.setName, card.setId)) return null;
   const nums = numberVariants(card.number, card.setTotal);
   if (!nums.length) return null;
-  return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : "", card.language === "JP" ? JP_WORDS : ""].filter(Boolean).join(" ") + EXCLUDE;
+  return [card.name, `(${nums.join(",")})`, card.finish === "reverse_holo" ? "reverse" : "", card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Automatische Suchbegriffe einer Karte aus der Datenbank (Job und App nutzen dieselben). Beide Suchen laufen,
 // die Ergebnisse werden zusammengeführt; doppelte Treffer erkennt der Job an der Artikelnummer.
 function autoQueries(c) {
   const card = { name: c.name, setName: c.set_name, setId: setIdOf(c), number: c.card_number, setTotal: c.set_total,
-    finish: c.finish || (c.foil ? "holo" : "non_holo"), language: c.language };
+    finish: c.finish || (c.foil ? "holo" : "non_holo"), language: c.language, grader: c.grader && c.grade != null ? c.grader : null };
   const num = buildNumberQuery(card);
   // Japanische Karte aus einem Set ohne bekannte eBay-Begriffe: nur die Nummernsuche, "Name + japanisch" allein
   // brächte vor allem Verkäufe anderer Karten desselben Pokémon
@@ -1001,6 +1103,9 @@ function cardFromRow(c) {
     finish: c.finish || (c.foil ? "holo" : "non_holo"),
     firstEdition: Boolean(c.first_edition),
     variants: meta.variants || null,
+    graded: Boolean(c.grader && c.grade != null),
+    grader: c.grader || null,
+    gradeKey: gradeKey(c.grader, c.grade, c.grade_label),
   };
 }
 
@@ -1023,6 +1128,12 @@ function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
   if (!facts.finish) facts.finish = finishFromText(r.title || "");
   if (facts.format === "auction") facts.priceUncertain = false; // ältere Zeilen: Auktionspreis ist echt
+  // Ältere Zeilen (vor der Grading-Erkennung gespeichert): Grade aus dem Titel nachlesen
+  if (facts.graded && facts.gradeKey === undefined) {
+    const g = parseGrade(r.title || "");
+    facts.gradeKey = g && g.key ? g.key : null;
+    facts.gradeUncertain = Boolean(g && g.uncertain);
+  }
   // Von dir in der App gesetzter Zustand (Spalte stage_override) hat Vorrang vor der automatischen Erkennung
   if (STAGES.includes(r.stage_override)) {
     facts.stageAuto = facts.stage ?? null;
@@ -1046,12 +1157,20 @@ function triage(card, sale) {
   if (!sale.soldAt || sale.currency !== "EUR") return "drop";
   if (!relevant(card, sale)) return "drop";
   if (sale.multi) return "drop";
-  if (sale.graded && sale.gradedReason !== "search-condition") return "drop";
+  if (card.graded) {
+    if (!saleGradeFor(card, sale).graded) return "drop";
+  } else if (sale.graded && sale.gradedReason !== "search-condition") return "drop";
   if (sale.variant === "4th_print" || (sale.variant === "shadowless" && !card.firstEdition)) return "drop";
   if (sale.reprint && !norm(card.setName || "").includes(sale.reprint)) return "drop";
   if (sale.conflicts.length) return "drop";
   const c = check(card, sale);
   if (c.language === "mismatch" || c.edition === "mismatch" || c.finish === "mismatch") return "drop";
+  if (card.graded) {
+    // anderer Grade: für die Tabelle "Preise nach Grade" speichern, Detailseite unnötig
+    if (c.condition === "mismatch" || sale.hasDetail) return "ok";
+    return c.condition === "unknown" || c.language === "unknown" || c.finish === "unknown" || c.finish === "unproven" ||
+      (card.firstEdition && c.edition !== "match") ? "detail" : "ok";
+  }
   if (c.condition === "mismatch" && sale.stageSource === "title") return "drop";
   if (sale.hasDetail) return "ok";
   if (sale.priceUncertain) return "detail"; // Preisvorschlag: nur die Detailseite nennt den gezahlten Betrag
@@ -1093,11 +1212,11 @@ function withSiblingFacts(sale, sib) {
 // bei jedem Abruf etwas anders umrechnet (sonst würde derselbe Verkauf mehrfach gespeichert).
 const saleKey = (s) => `${s.itemId}|${String(s.soldAt || "").slice(0, 10)}`;
 
-return { parseSale, matchCard, buildQuery, autoQuery, autoQueries, cardFromRow, saleFromDb, snapshotPayload, stagesIn, saleKey, STAGES, setIdOf, queryKey, JP_SETS };
+return { parseSale, matchCard, buildQuery, autoQuery, autoQueries, cardFromRow, saleFromDb, snapshotPayload, stagesIn, saleKey, STAGES, setIdOf, queryKey, JP_SETS, GRADERS, gradeKey, parseGrade };
 })();
 /*EBAY-LOGIC-END*/
 
-const state = { cards: [], latest: {}, daily: [], view: "list", filter: { q: "", set: "", status: [], finish: [], first: [], value: [], cond: [], dupes: [], lang: [], sort: "value" } };
+const state = { cards: [], latest: {}, daily: [], view: "list", filter: { q: "", set: "", status: [], finish: [], first: [], value: [], cond: [], graded: [], dupes: [], lang: [], sort: "value" } };
 const triedImages = new Set();
 const YEAR_KEY = "kt_set_years_v1";
 try { state.setYears = JSON.parse(localStorage.getItem(YEAR_KEY) || "{}") || {}; } catch (e) { state.setYears = {}; }
@@ -1146,6 +1265,67 @@ const condOptions = sel =>
   (sel && !COND_CODES.includes(sel) ? `<option value="${esc(sel)}" selected>${esc(sel)} (alte Skala)</option>` : "") +
   CONDITIONS.map(([v, l]) => `<option value="${v}"${v === sel ? " selected" : ""}>${l} (${v})</option>`).join("");
 const finishOptions = sel => FINISHES.map(([v, l]) => `<option value="${v}"${v === sel ? " selected" : ""}>${l}</option>`).join("");
+
+/* ---------- Grading ---------- */
+const isGraded = c => Boolean(c && c.grader && c.grade != null);
+const gradeText = c => (isGraded(c) ? EBAY.gradeKey(c.grader, c.grade, c.grade_label) : "");
+// Zustandsmarke einer Karte: bei gegradeten Karten Prüfdienst und Note
+const condTag = c => (isGraded(c) ? `<span class="tag graded">${esc(gradeText(c))}</span>` : `<span class="tag">${esc(c.condition)}</span>`);
+const GRADE_STEPS = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"];
+const GRADE_LABELS = [["", "ohne Zusatz"], ["pristine", "Pristine"], ["black", "Black Label"], ["perfect", "Perfect"]];
+// Link zur Zertifikatsprüfung beim Prüfdienst (nur wo die Adresse bekannt ist)
+const certUrl = c => {
+  const n = String(c.cert_number || "").replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9-]{4,20}$/.test(n)) return null;
+  if (c.grader === "PSA") return `https://www.psacard.com/cert/${encodeURIComponent(n)}`;
+  if (c.grader === "CGC") return `https://www.cgccards.com/certlookup/${encodeURIComponent(n)}/`;
+  return null;
+};
+// Eingabefelder "Ungegradet / Gegradet" für Hinzufügen und Bearbeiten
+function gradeFieldsHtml(c) {
+  const on = isGraded(c);
+  const known = EBAY.GRADERS.some(g => g.code === (c && c.grader));
+  const gsel = on ? (known ? c.grader : "other") : "PSA";
+  const gnum = on ? String(Number(c.grade)) : "10";
+  return `<div class="gradebox fwide">
+    <div class="seg" id="gseg" role="group" aria-label="Grading"><button type="button" data-g="0" class="${on ? "" : "on"}" aria-pressed="${!on}">Ungegradet</button><button type="button" data-g="1" class="${on ? "on" : ""}" aria-pressed="${on}">Gegradet</button></div>
+    <div class="gfields" id="gfields"${on ? "" : " hidden"}>
+      <label>Prüfdienst<select id="grader">${EBAY.GRADERS.map(g => `<option value="${g.code}"${g.code === gsel ? " selected" : ""}>${esc(g.label)}</option>`).join("")}<option value="other"${gsel === "other" ? " selected" : ""}>Anderer …</option></select></label>
+      <label id="gotherl"${gsel === "other" ? "" : " hidden"}>Name des Prüfdienstes<input id="gother" type="text" value="${esc(on && !known ? c.grader : "")}" placeholder="z. B. ARS" autocomplete="off"></label>
+      <label>Note<select id="grade">${GRADE_STEPS.map(v => `<option value="${v}"${v === gnum ? " selected" : ""}>${v}</option>`).join("")}</select></label>
+      <label>Zusatz auf dem Etikett<select id="glabel">${GRADE_LABELS.map(([v, l]) => `<option value="${v}"${on && (c.grade_label || "") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="gcert">Zertifikatsnummer (optional)<input id="gcert" type="text" inputmode="numeric" value="${esc(on ? c.cert_number || "" : "")}" autocomplete="off"></label>
+      <small class="muted gnote">Der Wert kommt dann nur aus Verkäufen mit demselben Prüfdienst und derselben Note (z. B. PSA 9). „Pristine“ und „Black Label“ zählen als eigene Stufe, weil sie deutlich teurer gehandelt werden.</small>
+    </div>
+  </div>`;
+}
+function wireGradeFields(root) {
+  const seg = root.querySelector("#gseg");
+  if (!seg) return;
+  const set = on => {
+    seg.querySelectorAll("button").forEach(b => { const x = b.dataset.g === (on ? "1" : "0"); b.classList.toggle("on", x); b.setAttribute("aria-pressed", String(x)); });
+    root.querySelector("#gfields").hidden = !on;
+    const cond = root.querySelector("#cond");
+    if (cond) cond.closest("label").hidden = on; // Zustand gilt nur für ungegradete Karten
+  };
+  seg.onclick = e => { const b = e.target.closest("[data-g]"); if (b) set(b.dataset.g === "1"); };
+  root.querySelector("#grader").onchange = e => { root.querySelector("#gotherl").hidden = e.target.value !== "other"; };
+  set(!root.querySelector("#gfields").hidden);
+}
+// Gelesene Grading-Angaben: { grader, grade, grade_label, cert_number } (alles null bei ungegradet) oder { error }
+function readGradeFields(root) {
+  const seg = root.querySelector("#gseg");
+  const none = { grader: null, grade: null, grade_label: null, cert_number: null };
+  if (!seg || root.querySelector("#gfields").hidden) return none;
+  let grader = root.querySelector("#grader").value;
+  if (grader === "other") {
+    grader = root.querySelector("#gother").value.trim().toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9 .&-]{1,19}$/.test(grader)) return { error: "Bitte den Namen des Prüfdienstes eintragen (z. B. ARS)." };
+  }
+  const cert = root.querySelector("#gcert").value.trim();
+  return { grader, grade: Number(root.querySelector("#grade").value), grade_label: root.querySelector("#glabel").value || null, cert_number: cert || null };
+}
+const GRADE_UPDATE_MSG = "Gegradete Karten: Bitte zuerst update-grading.sql in Supabase ausführen, dann erneut speichern.";
 
 // TCGdex-Sprachkürzel: die App speichert "JP", TCGdex nennt Japanisch "ja"
 const tcgLang = l => (l === "JP" ? "ja" : String(l || "en").toLowerCase());
@@ -1295,15 +1475,15 @@ function exportCsv() {
     if (/^[=+\-@]/.test(x)) x = "'" + x; // keine Formeln in Excel auslösen
     return /[;"\n\r]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
   };
-  const head = ["Name", "Set", "Jahr", "Nummer", "Sprache", "Zustand", "Ausführung", "1st Edition", "Menge",
+  const head = ["Name", "Set", "Jahr", "Nummer", "Sprache", "Zustand", "Grading", "Zertifikat", "Ausführung", "1st Edition", "Menge",
     "Kaufpreis pro Karte (€)", "Wert pro Karte (€)", "Wert gesamt (€)", "Gewinn/Verlust (€)", "Status", "Verkäufe",
     "Grundlage", "Wertstand", "eBay-Suchbegriff", "TCGdex-ID", "Hinzugefügt am"];
   const rows = cardRows().sort((a, b) => (b.total ?? -1) - (a.total ?? -1)).map(r => {
     const c = r.c, e = r.e;
     const pp = c.purchase_price_eur != null ? Number(c.purchase_price_eur) : null;
     return [
-      txt(c.name), txt(c.set_name), txt(c.set_name ? setYear(c.set_name) : ""), txt(c.card_number), txt(c.language), txt(c.condition),
-      txt(FIN_TEXT[finishOf(c)] || ""), c.first_edition ? "ja" : "nein", c.quantity,
+      txt(c.name), txt(c.set_name), txt(c.set_name ? setYear(c.set_name) : ""), txt(c.card_number), txt(c.language), txt(isGraded(c) ? "" : c.condition),
+      txt(gradeText(c)), txt(isGraded(c) ? c.cert_number || "" : ""), txt(FIN_TEXT[finishOf(c)] || ""), c.first_edition ? "ja" : "nein", c.quantity,
       num(pp), num(r.unit), num(r.total), num(pp != null && r.unit != null ? (r.unit - pp) * c.quantity : null),
       txt(STATUS_LABEL[facetOf("status", r)]), e ? e.n : "", txt(e ? e.basis : ""), txt(e ? fmtDate(e.date) : ""),
       txt(c.ebay_query || ""), txt(c.tcgdex_id || ""), txt(c.created_at ? fmtDate(String(c.created_at).slice(0, 10)) : ""),
@@ -1634,7 +1814,7 @@ function rowHtml(r) {
     <span class="rmain">
       <span class="name">${esc(c.name)}</span>
       <span class="rset">${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
-      <span class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}</span>
+      <span class="meta"><span class="tag">${esc(c.language)}</span>${condTag(c)}${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}</span>
     </span>
     <span class="price">${priceCell(r)}</span>
   </button></li>`;
@@ -1648,7 +1828,7 @@ function tileHtml(r) {
       : `<span class="noart">${esc(c.name)}</span>`}</span>
     <span class="tname" title="${esc(c.name)}">${esc(c.name)}</span>
     <span class="tset">${esc(c.set_name || "")}${c.card_number ? " Nr. " + esc(c.card_number) : ""}</span>
-    <span class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</span>
+    <span class="meta"><span class="tag">${esc(c.language)}</span>${condTag(c)}${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</span>
     <span class="tprice">${r.unit == null ? `<small>${c.ebay_checked_at ? "kein passender Verkauf" : "noch nicht abgefragt"}</small>` : `<b>${r.counted ? eur(r.total) : `<span class="prov">${eur(r.total)}</span>`}</b><small>${esc(ebayNote(r.e))}${r.counted ? "" : ", vorläufig"}</small>`}</span>
   </button></li>`;
 }
@@ -1930,6 +2110,7 @@ const FGROUPS = [
   { key: "first", label: "Edition", opts: [["1", "1st Edition"]] },
   { key: "value", label: "Wert pro Karte", opts: [["v0", "bis 5 €"], ["v5", "5–20 €"], ["v20", "20–50 €"], ["v50", "50–100 €"], ["v100", "über 100 €"]] },
   { key: "cond", label: "Zustand", opts: [["NM", "NM"], ["LP", "LP"], ["MP", "MP"], ["HP", "HP"]] },
+  { key: "graded", label: "Grading", opts: [["raw", "Ungegradet"], ["graded", "Gegradet"]] },
   { key: "dupes", label: "Menge", opts: [["1", "Doppelte (Menge über 1)"]] },
   { key: "lang", label: "Sprache", opts: [["DE", "Deutsch"], ["EN", "Englisch"], ["JP", "Japanisch"]] },
 ];
@@ -1938,6 +2119,7 @@ const QUICK = [
   { label: "Holo", key: "finish", vals: ["holo"] },
   { label: "Reverse", key: "finish", vals: ["reverse_holo"] },
   { label: "1st Edition", key: "first", vals: ["1"] },
+  { label: "Gegradet", key: "graded", vals: ["graded"] },
   { label: "Doppelte", key: "dupes", vals: ["1"] },
   { label: "über 20 €", key: "value", vals: ["v20", "v50", "v100"] },
   { label: "Vorläufig", key: "status", vals: ["prov"] },
@@ -1951,7 +2133,8 @@ function facetOf(key, r) {
     case "finish": return finishOf(c);
     case "first": return c.first_edition ? "1" : "";
     case "value": { const u = r.unit; return u == null ? "" : u < 5 ? "v0" : u < 20 ? "v5" : u < 50 ? "v20" : u < 100 ? "v50" : "v100"; }
-    case "cond": return c.condition;
+    case "cond": return isGraded(c) ? "" : c.condition;
+    case "graded": return isGraded(c) ? "graded" : "raw";
     case "dupes": return c.quantity > 1 ? "1" : "";
     case "lang": return c.language;
     default: return "";
@@ -1967,7 +2150,7 @@ function rowMatches(r, f, skipKey, tokens, years) {
     if (!f[g.key].includes(facetOf(g.key, r))) return false;
   }
   if (tokens.length) {
-    const hay = norm(`${c.name} ${c.set_name || ""} ${c.card_number || ""} ${years.get(c.set_name) || ""} ${c.first_edition ? "1st edition first edition" : ""} ${finishOf(c) === "holo" ? "holo" : finishOf(c) === "reverse_holo" ? "reverse holo" : ""}`);
+    const hay = norm(`${c.name} ${gradeText(c)} ${isGraded(c) ? "gegradet graded" : ""} ${c.set_name || ""} ${c.card_number || ""} ${years.get(c.set_name) || ""} ${c.first_edition ? "1st edition first edition" : ""} ${finishOf(c) === "holo" ? "holo" : finishOf(c) === "reverse_holo" ? "reverse holo" : ""}`);
     if (!tokens.every(t => hay.includes(t))) return false;
   }
   return true;
@@ -2440,9 +2623,26 @@ function openAdd() {
     if (finishSet) items.push(`Ausführung: ${esc(FIN_LABEL[finishSet] || finishSet)} erkannt, vorausgewählt.`);
     else items.push(`<span class="warn">Ausführung: nicht sicher erkennbar.</span> Bitte prüfen.`);
     if (v.normal && v.reverse && finishSet !== "reverse_holo") items.push("Diese Karte gibt es auch als Reverse Holo. Der Schimmer ist auf Fotos schwer zu sehen, bitte prüfen.");
-    items.push(`<span class="warn">Zustand bitte selbst wählen,</span> ein Foto reicht dafür nicht.`);
+    const gd = card.grading;
+    if (gd && gd.grader && gd.grade != null) items.push(`Grading erkannt: ${esc(String(gd.grader).toUpperCase())} ${esc(gd.grade)}${gd.label ? " " + esc(gd.label) : ""}${gd.cert ? `, Zertifikat ${esc(gd.cert)}` : ""}. Vorausgefüllt, bitte prüfen.`);
+    else items.push(`<span class="warn">Zustand bitte selbst wählen,</span> ein Foto reicht dafür nicht.`);
     if (card.notes) items.push(`Hinweis der Erkennung: ${esc(card.notes)}`);
     return `<div class="scanhint" role="note"><b>Scan-Ergebnis</b><ul>${items.map(x => `<li>${x}</li>`).join("")}</ul></div>`;
+  }
+
+  // Gegradete Karte gescannt: Prüfdienst, Note und Zertifikat vorausfüllen
+  function prefillGrade(g) {
+    if (!g || !g.grader || g.grade == null) return;
+    sheet.querySelector('#gseg [data-g="1"]').click();
+    const code = String(g.grader).toUpperCase().replace(/^BECKETT$/, "BGS");
+    const known = EBAY.GRADERS.some(x => x.code === code);
+    $("#grader", sheet).value = known ? code : "other";
+    $("#gotherl", sheet).hidden = known;
+    if (!known) $("#gother", sheet).value = code;
+    const num = String(Number(String(g.grade).replace(",", ".")));
+    if (GRADE_STEPS.includes(num)) $("#grade", sheet).value = num;
+    if (["pristine", "black", "perfect"].includes(g.label)) $("#glabel", sheet).value = g.label;
+    if (g.cert) $("#gcert", sheet).value = String(g.cert);
   }
 
   async function pick(id) {
@@ -2475,6 +2675,7 @@ function openAdd() {
         <div id="scanhint"></div>
         ${jp ? `<label>Name für die eBay-Suche (englisch)<input id="enname" type="text" value="${esc(s.enName || "")}" placeholder="z. B. Charizard" autocomplete="off">
           <small class="muted">Japanische Karten werden auf eBay fast immer mit englischem Namen angeboten. Bitte prüfen, z. B. „Dark Charizard“ statt „Charizard“.</small></label>` : ""}
+        ${gradeFieldsHtml(null)}
         <label>Zustand<select id="cond">${condOptions("NM")}</select></label>
         <label>Menge<input id="qty" type="number" min="1" value="1" inputmode="numeric"></label>
         <label>Ausführung<select id="finish">${finishOptions(defFinish)}</select></label>
@@ -2484,6 +2685,8 @@ function openAdd() {
         <button id="save" class="primary wide">Zur Sammlung hinzufügen</button>
         <p class="err" id="saveerr"></p>`;
       $("#save", sheet).onclick = save;
+      wireGradeFields(sheet);
+      if (s.scan && s.scan.card && s.scan.card.grading) prefillGrade(s.scan.card.grading);
       if (s.scan) {
         const sc = s.scan.card;
         const possible = { holo: v.holo, reverse_holo: v.reverse, non_holo: v.normal };
@@ -2514,6 +2717,8 @@ function openAdd() {
     btn.disabled = true;
     const pp = $("#pp", sheet).value;
     const noNum = jp && jpNoNumber(sid);
+    const gr = readGradeFields(sheet);
+    if (gr.error) { $("#saveerr", sheet).textContent = gr.error; btn.disabled = false; return; }
     const row = {
       name: jp ? enName : c.name,
       set_name: jp ? jpSetLabel(sid, c.set && c.set.name) : ((c.set && c.set.name) || null),
@@ -2528,6 +2733,7 @@ function openAdd() {
       finish: $("#finish", sheet).value
     };
     if ($("#first", sheet).checked) row.first_edition = true;
+    if (gr.grader) Object.assign(row, gr, { condition: "NM" }); // Zustand gilt bei gegradeten Karten nicht
     // Zusatzangaben für den eBay-Abgleich, nur wenn update5.sql schon gelaufen ist
     if (!state.cards.length || "set_total" in state.cards[0]) {
       row.set_total = noNum ? null : ((c.set && c.set.cardCount && c.set.cardCount.official) || null);
@@ -2546,6 +2752,7 @@ function openAdd() {
         : /finish|condition/.test(error.message) ? UPDATE4_MSG
         : /set_total|tcg_meta/.test(error.message) ? UPDATE5_MSG
         : /language/.test(error.message) ? JP_UPDATE_MSG
+        : /grade|grader|cert_number/.test(error.message) ? GRADE_UPDATE_MSG
         : "Speichern fehlgeschlagen: " + error.message;
       btn.disabled = false;
       return;
@@ -2590,6 +2797,7 @@ const REJECT_REASONS = [
   ["unknown_edition", "1st Edition nicht belegt", "Deine Karte ist eine 1st Edition, der Verkauf nennt sie nicht."],
   ["unknown_finish", "Ausführung nicht erkennbar", ""],
   ["graded", "Bewertete Karte (PSA, BGS …)", ""],
+  ["ungraded", "Ungegradete Karte", "Deine Karte ist gegradet, dieser Verkauf nicht."],
   ["multi", "Sammelangebot oder mehrere Karten", ""],
   ["variant", "Anderer Druck (z. B. 4th Print, Shadowless)", ""],
   ["reprint", "Neuauflage (z. B. Celebrations)", ""],
@@ -2624,7 +2832,8 @@ function saleImgHtml(src) {
 }
 
 function saleTags(s, editable) {
-  const t = [s.language || "Sprache offen", s.stage || "Zustand offen"];
+  const t = [s.language || "Sprache offen", s.graded ? (s.gradeKey || (s.gradeUncertain ? "Grade unklar" : "Grade offen")) : (s.stage || "Zustand offen")];
+  if (s.graded) editable = false;
   const f = s.finishEff || s.finish;
   if (f) t.push(FIN_LABEL[f] + (s.finishEff && s.finishEff !== s.finish ? " (laut Nummer)" : ""));
   if (s.edition === "1st") t.push("1st Ed.");
@@ -2686,14 +2895,15 @@ async function openDetail(id) {
       <div class="dinfo">
         ${c.language === "JP" && c.tcg_meta && c.tcg_meta.nameJa ? `<p class="muted">${esc(c.tcg_meta.nameJa)}</p>` : ""}
         <p class="muted">${esc(c.set_name || "")}${year ? ` (${year})` : ""}${c.card_number ? `, Nr. ${esc(c.card_number)}` : ""}</p>
-        <div class="meta"><span class="tag">${esc(c.language)}</span><span class="tag">${esc(c.condition)}</span>${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</div>
+        <div class="meta"><span class="tag">${esc(c.language)}</span>${condTag(c)}${finishTag(c)}${c.first_edition ? `<span class="tag first">1st Ed.</span>` : ""}${c.quantity > 1 ? `<span class="tag">${c.quantity}×</span>` : ""}</div>
+        ${isGraded(c) && c.cert_number ? `<p class="muted dsmall">Zertifikat ${certUrl(c) ? `<a href="${esc(certUrl(c))}" target="_blank" rel="noopener">${esc(c.cert_number)}</a>` : esc(c.cert_number)}</p>` : ""}
         <div id="dvalue">${valueBlockHtml(c, e0)}</div>
       </div>
       <div class="dstatswrap" id="dstats">${statsHtml(c, e0)}</div>
     </div>
     <section class="dsec">
-      <h3>Preise nach Zustand</h3>
-      ${langReset ? `<p class="note" role="note">Sprache geändert: Die Verkäufe der bisherigen Suche werden beim nächsten Lauf verworfen, die Karte wird in der neuen Sprache neu gesucht.</p>` : ""}
+      <h3>${isGraded(c) ? "Preise nach Note" : "Preise nach Zustand"}</h3>
+      ${langReset ? `<p class="note" role="note">Sprache oder Grading geändert: Die Verkäufe der bisherigen Suche werden beim nächsten Lauf verworfen, die Karte wird neu gesucht.</p>` : ""}
       <div id="bycond"><p class="muted dsmall">Wird geladen …</p></div>
     </section>
     <section class="dsec">
@@ -2708,6 +2918,7 @@ async function openDetail(id) {
     <section class="dsec">
       <h3>Bearbeiten</h3>
       <div class="dform">
+        ${gradeFieldsHtml(c)}
         <label class="fcond">Zustand<select id="cond">${condOptions(c.condition)}</select></label>
         <label class="ffin">Ausführung<select id="finish">${finishOptions(finishOf(c))}</select></label>
         <label>Menge<input id="qty" type="number" min="1" value="${c.quantity}" inputmode="numeric"></label>
@@ -2738,7 +2949,7 @@ async function openDetail(id) {
   };
 
   const STAGE_NAMES = { NM: "Near Mint or Better", LP: "Lightly Played", MP: "Moderately Played", HP: "Heavily Played" };
-  const openStages = new Set([c.condition]); // aufgeklappte Zustände, deiner ist zu Beginn offen
+  const openStages = new Set([isGraded(c) ? gradeText(c) : c.condition]); // aufgeklappte Zeilen, deine ist zu Beginn offen
   let lastRes = null;
 
   // Preisvorschlag: gezahlter Betrag, darunter der durchgestrichene Angebotspreis (wie bei eBay)
@@ -2749,7 +2960,7 @@ async function openDetail(id) {
   const saleLi = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
       ${saleImgHtml(s.image)}
       <span class="sd">${shortDate(s.soldAt)}</span>
-      <span class="st">${saleTags(s, canSetStage)}</span>
+      <span class="st">${saleTags(s, canSetStage && !isGraded(c))}</span>
       <span class="sp">${salePriceHtml(s)}</span>
       <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
       <button class="ghost sx" data-x="${s._id}">Ausschließen</button>
@@ -2758,7 +2969,7 @@ async function openDetail(id) {
   const saleLiPlain = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
       ${saleImgHtml(s.image)}
       <span class="sd">${shortDate(s.soldAt)}</span>
-      <span class="st">${saleTags(s, canSetStage)}</span>
+      <span class="st">${saleTags(s, canSetStage && !isGraded(c))}</span>
       <span class="sp">${salePriceHtml(s)}</span>
       <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
     </li>`;
@@ -2787,7 +2998,8 @@ async function openDetail(id) {
     const order = [...known.filter(k => groups.has(k)), ...[...groups.keys()].filter(k => !known.includes(k))];
     const total = order.reduce((n, k) => n + groups.get(k).length, 0);
     const groupHtml = order.map(k => {
-      const [, label, hint] = REJECT_REASONS.find(([x]) => x === k) || [k, k, ""];
+      let [, label, hint] = REJECT_REASONS.find(([x]) => x === k) || [k, k, ""];
+      if (k === "unknown_condition" && isGraded(c)) { label = "Grade nicht erkennbar"; hint = "Der Titel nennt keine eindeutige Note, z. B. „PSA 10 Kandidat“ oder zwei Prüfdienste."; }
       const list = groups.get(k).sort((x, y) => new Date(y.soldAt) - new Date(x.soldAt));
       return `<details class="rgrp" data-reason="${esc(k)}"><summary>${esc(label)} (${list.length})</summary>
         ${hint ? `<p class="muted dsmall">${esc(hint)}</p>` : ""}
@@ -2811,13 +3023,29 @@ async function openDetail(id) {
     const box = $("#bycond", sheet);
     if (!box) return;
     const nowMs = Date.now();
+    const graded = isGraded(c);
+    const ownKey = graded ? gradeText(c) : c.condition;
+    // Zeilen: bei ungegradeten Karten die vier Zustände, bei gegradeten alle Noten aus den Verkäufen
+    // (eigener Prüfdienst zuerst, dann absteigend), die eigene Note immer
+    let keys = EBAY.STAGES;
+    const keyCard = {};
+    if (graded) {
+      const found = new Set([ownKey]);
+      for (const r of rows) if (!r.excluded) { const x = EBAY.saleFromDb(r); if (x.graded && x.gradeKey) found.add(x.gradeKey); }
+      const parsed = [...found].map(k => EBAY.parseGrade(k, [c.grader])).filter(g => g && g.key);
+      const lblRank = { black: 0, pristine: 1, perfect: 1 };
+      parsed.sort((a, b) => (b.grader === c.grader) - (a.grader === c.grader) || a.grader.localeCompare(b.grader) || b.grade - a.grade || (lblRank[a.label] ?? 2) - (lblRank[b.label] ?? 2));
+      for (const g of parsed) keyCard[g.key] = { grader: g.grader, grade: g.grade, grade_label: g.label };
+      keys = parsed.map(g => g.key);
+    }
     const head = res.tier === "none"
-      ? "Für deinen Zustand gibt es keinen passenden Verkauf."
+      ? (graded ? "Für deine Note gibt es keinen passenden Verkauf." : "Für deinen Zustand gibt es keinen passenden Verkauf.")
       : `Dein Wert: Median aus ${res.headline.n} ${res.headline.n === 1 ? "Verkauf" : "Verkäufen"} (${res.headline.basis})${res.tier === "strict" ? ", alle Merkmale belegt." : ", teils mit Annahmen: Eine unbekannte Sprache oder Ausführung gilt als passend."}`;
-    const lines = EBAY.STAGES.map(st => {
-      const r = st === c.condition ? res : compute({ ...c, condition: st });
+    const lines = keys.map(st => {
+      const own = st === ownKey;
+      const r = own ? res : compute(graded ? { ...c, ...keyCard[st] } : { ...c, condition: st });
       const h = r.headline;
-      const own = st === c.condition;
+      if (graded && !own && !h) return ""; // Noten ohne verwertbaren Verkauf weglassen
       // genau die Verkäufe, aus denen der Median dieser Zeile stammt
       const days = h && h.basis === "90 Tage" ? 90 : 365;
       const list = h ? r.used.filter(x => nowMs - new Date(x.soldAt).getTime() <= days * 86400000) : [];
@@ -2828,7 +3056,7 @@ async function openDetail(id) {
       const n = h ? `${h.n} ${h.n === 1 ? "Verkauf" : "Verkäufe"}, ${h.basis}${h.n >= 3 ? "" : ", vorläufig"}` : "kein Verkauf";
       const label = `<span class="chev" aria-hidden="true">${can ? (isOpen ? "▾" : "▸") : ""}</span>${st}`;
       const row = `<tr class="${[own ? "own" : "", can ? "can" : ""].join(" ").trim()}"${can ? ` data-stage="${st}"` : ""}>
-        <th scope="row">${can ? `<button class="cbtn" data-stage="${st}" aria-expanded="${isOpen}">${label}</button>` : label}${own ? ` <span class="tag own-mark">deine Karte</span>` : ""}<small>${STAGE_NAMES[st]}</small></th>
+        <th scope="row">${can ? `<button class="cbtn" data-stage="${st}" aria-expanded="${isOpen}">${label}</button>` : label}${own ? ` <span class="tag own-mark">deine Karte</span>` : ""}<small>${graded ? esc((EBAY.GRADERS.find(g => g.code === keyCard[st].grader) || { label: keyCard[st].grader }).label) : STAGE_NAMES[st]}</small></th>
         <td class="num price">${price}</td>
         <td class="num"><small>${n}</small></td></tr>`;
       const exp = isOpen ? `<tr class="exp" data-for="${st}"><td colspan="3">
@@ -2850,11 +3078,13 @@ async function openDetail(id) {
     box.innerHTML = `
       <p class="dsmall">${esc(head)}</p>
       <table class="ctab">
-        <thead><tr><th scope="col">Zustand</th><th scope="col" class="num">Median</th><th scope="col" class="num">Grundlage</th></tr></thead>
+        <thead><tr><th scope="col">${graded ? "Note" : "Zustand"}</th><th scope="col" class="num">Median</th><th scope="col" class="num">Grundlage</th></tr></thead>
         <tbody>${lines}</tbody>
       </table>
-      <p class="muted dsmall">Tippe auf einen Zustand, um die einzelnen Verkäufe mit Link zu eBay zu sehen. Gleiche Sprache, Edition und Ausführung wie deine Karte, nur der Zustand wechselt. Grau: weniger als 3 Verkäufe.${canSetStage ? " Stimmt der Zustand eines Verkaufs nicht, tippe auf sein Zustandslabel und wähle den richtigen; der Verkauf wandert dann in diese Zeile." : ""}</p>
-      ${unknown ? `<p class="muted dsmall">${unknown} passende ${unknown === 1 ? "Verkauf lässt" : "Verkäufe lassen"} sich keinem Zustand zuordnen und ${unknown === 1 ? "fehlt" : "fehlen"} in der Tabelle.</p>` : ""}
+      <p class="muted dsmall">${graded
+        ? "Tippe auf eine Note, um die einzelnen Verkäufe mit Link zu eBay zu sehen. Gleiche Karte, Sprache, Edition und Ausführung, nur Prüfdienst und Note wechseln. Grau: weniger als 3 Verkäufe."
+        : `Tippe auf einen Zustand, um die einzelnen Verkäufe mit Link zu eBay zu sehen. Gleiche Sprache, Edition und Ausführung wie deine Karte, nur der Zustand wechselt. Grau: weniger als 3 Verkäufe.${canSetStage ? " Stimmt der Zustand eines Verkaufs nicht, tippe auf sein Zustandslabel und wähle den richtigen; der Verkauf wandert dann in diese Zeile." : ""}`}</p>
+      ${unknown ? `<p class="muted dsmall">${unknown} passende ${unknown === 1 ? "Verkauf lässt" : "Verkäufe lassen"} sich ${graded ? "keiner Note" : "keinem Zustand"} zuordnen und ${unknown === 1 ? "fehlt" : "fehlen"} in der Tabelle.</p>` : ""}
       ${cover ? `<p class="muted dsmall">${esc(cover)}</p>` : ""}`;
   };
 
@@ -2935,6 +3165,7 @@ async function openDetail(id) {
     renderSales();
   }
 
+  wireGradeFields(sheet);
   $("#upd", sheet).onclick = async () => {
     const ppv = $("#pp", sheet).value;
     const patch = {
@@ -2953,6 +3184,19 @@ async function openDetail(id) {
     if ((iu || null) !== (c.image_url || null)) patch.image_url = iu || null;
     const q = $("#eq", sheet).value.trim();
     if ((q || null) !== (c.ebay_query || null)) { patch.ebay_query = q || null; patch.ebay_checked_at = null; } // neuer Suchbegriff: beim nächsten Lauf sofort abfragen
+    const gr = readGradeFields(sheet);
+    if (gr.error) { $("#derr", sheet).textContent = gr.error; return; }
+    const wasGraded = isGraded(c);
+    if (gr.grader || wasGraded) {
+      const cur = { grader: c.grader || null, grade: c.grade == null ? null : Number(c.grade), grade_label: c.grade_label || null, cert_number: c.cert_number || null };
+      for (const k of Object.keys(cur)) if ((gr[k] ?? null) !== cur[k]) patch[k] = gr[k];
+      if (gr.grader) patch.condition = c.condition; // bleibt unverändert, gilt bei gegradeten Karten nicht
+      // Wechsel zwischen ungegradet und gegradet oder anderer Prüfdienst: andere Suche, alte Verkäufe verwerfen
+      if (Boolean(gr.grader) !== wasGraded || (gr.grader && gr.grader !== c.grader)) {
+        patch.ebay_checked_at = null;
+        patch.tcg_meta = { ...(c.tcg_meta || {}), salesReset: new Date().toISOString() };
+      }
+    }
     const enIn = $("#enname", sheet);
     if (enIn) {
       const en = enIn.value.trim();
@@ -2972,10 +3216,12 @@ async function openDetail(id) {
         ? "Bitte zuerst update3.sql in Supabase ausführen, dann erneut speichern."
         : /finish|condition/.test(error.message) ? UPDATE4_MSG
         : /ebay_query/.test(error.message) ? UPDATE5_MSG
+        : /grade|grader|cert_number/.test(error.message) ? GRADE_UPDATE_MSG
         : "Speichern fehlgeschlagen: " + error.message;
       return;
     }
-    if (langChanged) await clearSnapshot(c);
+    const salesReset = patch.tcg_meta && patch.tcg_meta.salesReset && patch.tcg_meta.salesReset !== (c.tcg_meta || {}).salesReset;
+    if (langChanged || salesReset) await clearSnapshot(c);
     else if (rows) await writeSnapshot({ ...c, ...patch }, compute({ ...c, ...patch }), Boolean((state.latest[id] || {}).ebay_sold));
     closeSheet();
     await loadMain({ quiet: true });
