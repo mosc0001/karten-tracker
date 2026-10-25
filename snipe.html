@@ -259,36 +259,6 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .pick img,.noimg{width:44px;height:61px;object-fit:contain;border-radius:4px;flex:none}
 .noimg{background:var(--fill)}
 .pick small{display:block;color:var(--muted)}
-.ctop{display:flex;gap:18px;align-items:center;margin:2px 0 4px}
-.cart{flex:none;display:block;width:118px;aspect-ratio:63/88;border-radius:9px;overflow:hidden;background:var(--fill);box-shadow:0 10px 26px rgba(0,0,0,.35);cursor:zoom-in}
-.cart img{width:100%;height:100%;object-fit:contain;display:block}
-.cart.photo img{object-fit:cover}
-@media (min-width:600px){.cart{width:150px}}
-.shipin{width:4.6em;display:inline-block;margin:0;padding:4px 8px;text-align:right;font-size:15px}
-.discbox{margin:14px 0 6px;padding:14px 16px;border-radius:14px;background:var(--fill)}
-.discrow{display:flex;justify-content:space-between;align-items:baseline;font-weight:600}
-.discrow label{margin:0;color:inherit;font-size:15px}
-.discrow output{font-size:20px;font-variant-numeric:tabular-nums}
-#disc{-webkit-appearance:none;appearance:none;width:100%;height:28px;margin:8px 0 2px;padding:0;background:transparent}
-#disc::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(90deg,var(--accent) var(--p,0%),var(--line,rgba(120,120,128,.3)) var(--p,0%))}
-.shipin::-webkit-inner-spin-button,.shipin::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}.shipin{-moz-appearance:textfield}
-#disc::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;margin-top:-11px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3),0 0 0 .5px rgba(0,0,0,.06)}
-#disc::-moz-range-track{height:4px;border-radius:2px;background:var(--line,rgba(120,120,128,.3))}
-#disc::-moz-range-thumb{width:26px;height:26px;border:0;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3)}
-#disc::-moz-range-progress{height:4px;border-radius:2px;background:var(--accent)}
-.discbox p{margin:4px 0 0}
-.bidtab{width:100%;border-collapse:collapse;margin:8px 0 4px;font-size:15px}
-.bidtab th,.bidtab td{padding:9px 4px;border-top:.5px solid var(--line,rgba(120,120,128,.3));text-align:left;vertical-align:middle;font-weight:400}
-.bidtab thead th{border-top:0;color:var(--muted);font-size:12px;padding-top:0}
-.bidtab th small{display:block;color:var(--muted);font-size:12px}
-.bidtab .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-.bidtab .big{font-size:18px;font-weight:600}
-.bidtab tr.mine th{font-weight:600}
-.sethits h4,.reshead{font-size:13px;font-weight:600;color:var(--muted);margin:14px 0 2px}
-.setpick .seticon{width:44px;height:44px;flex:none;border-radius:10px;background:var(--fill);display:flex;align-items:center;justify-content:center}
-.setpick .seticon img{width:28px;height:28px;object-fit:contain}
-.setpick>span:nth-child(2){flex:1;min-width:0}
-.chevr{color:var(--muted);opacity:.6;font-size:22px;padding:0 6px}
 .preview{display:flex;gap:16px;margin-top:12px}
 .preview img{width:104px;height:auto;border-radius:7px;align-self:flex-start;box-shadow:var(--poster-shadow)}
 .preview p{margin:2px 0}
@@ -444,6 +414,9 @@ details.rgrp>p{margin:2px 0 4px}
 .critwarn b{color:var(--ink)}
 .cardact{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .danger{color:#d70015}
+.shipedit{display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.shipedit input{width:6.5em;margin:0;padding:6px 8px;text-align:right}
+.shipedit small{flex-basis:100%;text-align:right}
 @media (prefers-color-scheme:dark){.danger{color:#ff6961}}
 </style>
 </head>
@@ -460,45 +433,6 @@ const SUPABASE_KEY = "sb_publishable_L4T61xqNhqn9QyOYW_IGPg_I70TkeeL";
 const SCOUT_ACTIONS = "https://github.com/mosc0001/snipe-scout/actions";
 const TCGDEX = "https://api.tcgdex.net/v2";
 const DEFAULTS = { discount: 0.15, max_total_eur: 400 };   // wie in watchlist.yaml
-// Reverse Holos mit Ball-Muster (seit Pokémon 151): eigene Variante mit eigenem Fairwert
-const BALLS = {
-  pokeball: { label: "Poké Ball", search: "Poke Ball", must: "poke ball|pokeball|poké ball" },
-  masterball: { label: "Master Ball", search: "Master Ball", must: "master ball|masterball" },
-};
-// Versand innerhalb Deutschlands (versichertes Paket für einen Slab), änderbar in der Kartenansicht, gilt für alle Karten
-const SHIP_DE_DEFAULT = 6.5;
-let shipDE = SHIP_DE_DEFAULT;
-try { const v = parseFloat(localStorage.getItem("snipe_ship_de")); if (v >= 0 && v < 100) shipDE = v; } catch (e) { /* Standard */ }
-// Höchstgebot, wenn der Verkäufer in Deutschland sitzt: Der Fairwert ist schon ein Endpreis aus Käufersicht
-// (inkl. Mehrwertsteuer, bei Nicht-EU-Verkäufen inkl. Einfuhrumsatzsteuer). Bei Versand aus Deutschland kommt nur der
-// Inlandsversand dazu: Gebot + Versand ≤ Fairwert × (1 − Abschlag), höchstens Budget − Versand.
-// Versand aus den USA (geschätzt, änderbar) und Höchstgebot für US-Verkäufer: Auf Gebot und Versand kommen 19 %
-// Einfuhrumsatzsteuer: (Gebot + Versand) × 1,19 ≤ Fairwert × (1 − Abschlag), höchstens Budget. Zoll ist nicht eingerechnet.
-const SHIP_US_DEFAULT = 25;
-let shipUS = SHIP_US_DEFAULT;
-try { const v = parseFloat(localStorage.getItem("snipe_ship_us")); if (v >= 0 && v < 200) shipUS = v; } catch (e) { /* Standard */ }
-function usBid(c) {
-  if (c.fair_eur == null) return null;
-  let total = Number(c.fair_eur) * (1 - Number(c.discount || 0));
-  if (c.max_total_eur) total = Math.min(total, Number(c.max_total_eur));
-  return Math.max(0, Math.floor(total / 1.19 - shipUS));
-}
-// EU-Versand (geschätzt, änderbar): Mehrwertsteuer ist wie bei deutschen Verkäufern im Preis enthalten
-const SHIP_EU_DEFAULT = 15;
-let shipEU = SHIP_EU_DEFAULT;
-try { const v = parseFloat(localStorage.getItem("snipe_ship_eu")); if (v >= 0 && v < 200) shipEU = v; } catch (e) { /* Standard */ }
-function euBid(c) {
-  if (c.fair_eur == null) return null;
-  let v = Number(c.fair_eur) * (1 - Number(c.discount || 0)) - shipEU;
-  if (c.max_total_eur) v = Math.min(v, Number(c.max_total_eur) - shipEU);
-  return Math.max(0, Math.floor(v));
-}
-function deBid(c) {
-  if (c.fair_eur == null) return null;
-  let v = Number(c.fair_eur) * (1 - Number(c.discount || 0)) - shipDE;
-  if (c.max_total_eur) v = Math.min(v, Number(c.max_total_eur) - shipDE);
-  return Math.max(0, Math.floor(v));
-}
 const UPDATE2_MSG = "Bitte zuerst snipe-update-2.sql im Supabase SQL Editor ausführen, dann erneut speichern.";
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -638,7 +572,7 @@ function render() {
           <ul class="list" style="margin-top:8px">${state.cards.filter(c => !c.active).map(cardRow).join("")}</ul></details>` : ""}
       </section>
       <button id="addfab" class="primary fab">+ Karte</button>
-      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. „DE“ gilt für Verkäufer in Deutschland: Mehrwertsteuer ist im Preis enthalten, es kommt nur der Inlandsversand dazu (Standard ${eur(SHIP_DE_DEFAULT, 2)}, in der Kartenansicht änderbar). „EU“ rechnet genauso mit dem EU-Versand (Standard ${eur(SHIP_EU_DEFAULT)}). Abschlag und Versandwerte stellst du in der Kartenansicht ein. „US“ gilt für Verkäufer in den USA: Auf Gebot und Versand kommen 19 % Einfuhrumsatzsteuer (Standard-Versand ${eur(SHIP_US_DEFAULT)}, änderbar; möglicher Zoll über 150 € nicht eingerechnet). Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
+      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
     </div>`;
 
   wire();
@@ -654,9 +588,9 @@ function candRow(x) {
       <span class="name">${esc(c.name)}</span>
       <span class="rset">${esc(x.title || "")}</span>
       <span class="meta"><span class="tag ${soon ? "soon" : "hot"}">${esc(left > 0 ? until(x.end_at) : "beendet " + dateDE(x.end_at))}</span>
-        <span class="tag">${esc(x.country || "?")}${x.non_eu ? " · Nicht-EU" : ""}</span><span class="tag">${x.bids ?? 0} Gebote</span></span>
+        <span class="tag">${esc(x.country || "?")}${x.non_eu ? " · Nicht-EU" : ""}</span><span class="tag">${x.bids ?? 0} Gebote</span>${x.shipping_manual_eur != null ? `<span class="tag">Versand korrigiert</span>` : ""}</span>
     </span>
-    <span class="price"><span class="lbl">Höchstgebot</span><span class="big">${eur(x.max_bid_eur)}</span><small>aktuell ${eur(x.current_eur)}</small></span>
+    <span class="price"><span class="lbl">Höchstgebot</span><span class="big">${eur(calcCand(x).bid)}</span><small>aktuell ${eur(x.current_eur)}</small></span>
   </button></li>`;
 }
 
@@ -672,7 +606,7 @@ function cardRow(c) {
         <span class="tag">−${Math.round(Number(c.discount || 0) * 100)} %</span>
         ${state.cands.some(x => x.card_id === c.id && new Date(x.end_at) > Date.now()) ? `<span class="tag hot">Treffer</span>` : ""}</span>
     </span>
-    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>${deBid(c) != null ? `max. ${eur(deBid(c))} DE · ${eur(euBid(c))} EU · ${eur(usBid(c))} US` : "max. –"}</small></span>
+    <span class="price">${c.fair_eur != null ? eur(c.fair_eur) : `<span class="prov">–</span>`}<small>max. ${eur(c.max_bid_eur)}</small></span>
   </button></li>`;
 }
 
@@ -721,8 +655,8 @@ function closeLightbox() {
 }
 document.addEventListener("click", e => {
   if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  const a = e.target.closest("a.simg, a.cimg, a.cart");
-  if (a) { e.preventDefault(); const im = a.querySelector("img"); openLightbox(a.href, im && im.currentSrc, a.classList.contains("cart") ? "Kartenbild" : "Angebotsfoto"); }
+  const a = e.target.closest("a.simg, a.cimg");
+  if (a) { e.preventDefault(); const im = a.querySelector("img"); openLightbox(a.href, im && im.currentSrc, "Angebotsfoto"); }
 });
 
 // Herkunft & Originalpreis: "238,50 $ · USA · inkl. EUSt"
@@ -820,36 +754,95 @@ function closeSheet() {
   document.body.classList.remove("lock");
 }
 
+// Höchstgebot wie im Scout (rules.max_bid): Gesamtkosten ≤ Fairwert × (1 − Abschlag).
+// Nicht-EU: Einfuhrumsatzsteuer (und ggf. Zoll) auf Gebot UND Versand, plus Auslagepauschale.
+const SHIP_SRC = { "Artikelseite": "laut Artikelseite", "Suche": "laut Suche, bitte prüfen", "geschätzt": "geschätzt", "manuell": "von dir" };
+function calcCand(x, shipOverride) {
+  const c = cardById(x.card_id);
+  const manual = x.shipping_manual_eur != null && x.shipping_manual_eur !== "" ? Number(x.shipping_manual_eur) : null;
+  const ship = shipOverride != null ? shipOverride : manual != null ? manual : Number(x.shipping_eur || 0);
+  const nonEu = Boolean(x.non_eu);
+  const vat = nonEu ? Number(x.vat ?? 0.19) : 0, duty = nonEu ? Number(x.duty ?? 0) : 0, fee = nonEu ? Number(x.import_fee_eur ?? 6) : 0;
+  const disc = Number(x.discount ?? c.discount ?? 0.15);
+  const cap = x.cap_eur ?? c.max_total_eur;
+  const mb = (fair, d) => {
+    const t = fair * (1 - d);
+    return Math.max(0, Math.floor(nonEu ? (t - fee) / ((1 + duty) * (1 + vat)) - ship : t - ship));
+  };
+  let bid = x.fair_eur != null ? mb(Number(x.fair_eur), disc) : Number(x.max_bid_eur || 0);
+  if (cap) bid = Math.min(bid, mb(Number(cap), 0));
+  const landed = nonEu ? (bid + ship) * (1 + duty) * (1 + vat) + fee : bid + ship;
+  const source = shipOverride != null || manual != null ? "manuell" : (x.shipping_source || (x.shipping_known ? "Suche" : "geschätzt"));
+  return { bid, ship, landed, vat, duty, fee, nonEu, source, manual, tooHigh: bid < Number(x.current_eur || 0) };
+}
+
 function openCand(itemId) {
   const x = state.cands.find(k => k.item_id === itemId);
   if (!x) return;
   const c = cardById(x.card_id);
-  const total = Number(x.max_bid_eur || 0) + Number(x.shipping_eur || 0);
   const link = ebayItemUrl(x.item_id, x.url), small = ebayImg(x.image, 500), big = ebayImg(x.image, 1600);
+  const k = calcCand(x);
   const sheet = openSheet(`
     <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
     <p class="dsmall muted" style="margin:0">${esc(x.title || "")}</p>
     ${small ? `<a class="cimg" href="${esc(big)}" target="_blank" rel="noopener" title="Foto groß ansehen"><img src="${esc(small)}" alt="Angebotsfoto" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></a>` : ""}
-    <p class="dprice">${eur(x.max_bid_eur)}</p>
+    <p class="dprice" id="cbid">${eur(k.bid)}</p>
     <p class="dsmall muted" style="margin:0 0 10px">Höchstgebot für Gixen · Ende ${esc(dtDE(x.end_at))} (${esc(until(x.end_at))})</p>
+    <p class="err" id="ctoohigh" style="margin:0 0 8px"${k.tooHigh ? "" : " hidden"}>Das aktuelle Gebot liegt schon über diesem Höchstgebot.</p>
     <dl class="dstats">
       <div class="drow"><dt>Aktuelles Gebot</dt><dd>${eur(x.current_eur, 2)} <small>${x.bids ?? 0} Gebote</small></dd></div>
       <div class="drow"><dt>Fairwert</dt><dd>${eur(x.fair_eur)}</dd></div>
-      <div class="drow"><dt>Versand</dt><dd>${eur(x.shipping_eur, 2)}${x.shipping_known ? "" : " <small>geschätzt</small>"}</dd></div>
-      <div class="drow"><dt>Herkunft</dt><dd>${esc(x.country || "?")}${x.non_eu ? " <small>Nicht-EU, EUSt eingerechnet</small>" : ""}</dd></div>
-      <div class="drow"><dt>Gesamt bei Höchstgebot</dt><dd>${x.non_eu ? "inkl. Einfuhr ≤ Budget" : eur(total)}</dd></div>
+      <div class="drow"><dt>Versand nach DE</dt><dd class="shipedit">
+        <input id="shipin" type="number" min="0" step="0.01" inputmode="decimal" value="${k.ship.toFixed(2)}" aria-label="Versandkosten in Euro"> €
+        <small id="shipsrc">${esc(SHIP_SRC[k.source] || "")}</small></dd></div>
+      <div class="drow"><dt>Herkunft</dt><dd>${esc(x.country || "?")}${k.nonEu ? ` <small>Nicht-EU: ${Math.round(k.vat * 100)} % EUSt auf Gebot + Versand${k.duty ? `, ${Math.round(k.duty * 1000) / 10} % Zoll` : ""}, ${eur(k.fee)} Pauschale</small>` : ""}</dd></div>
+      <div class="drow mine"><dt>Gesamt bei Höchstgebot</dt><dd id="clanded">${eur(k.landed, 2)}</dd></div>
       <div class="drow"><dt>Verkäufer</dt><dd>${esc(x.seller || "")}</dd></div>
       <div class="drow"><dt>Artikelnummer</dt><dd><code>${esc(x.item_id)}</code></dd></div>
     </dl>
+    <div class="btnrow" style="margin-top:10px">
+      <button class="ghost" id="shipsave" disabled>Versand übernehmen</button>
+      <button class="ghost" id="shipreset"${k.manual != null ? "" : " hidden"}>Wert des Scouts verwenden</button>
+    </div>
+    <p class="err" id="shiperr"></p>
     <div class="btnrow">
       ${link ? `<a class="primary" href="${esc(link)}" target="_blank" rel="noopener">Bei eBay ansehen</a>` : ""}
       <button class="ghost copy" id="copyid">Artikelnr. kopieren</button>
       <a class="ghost" href="https://www.gixen.com/" target="_blank" rel="noopener">Gixen öffnen</a>
     </div>
-    <p class="dnote">Vor dem Eintragen: Cert-Nummer auf dem Slab-Foto bei PSA prüfen und Sprache/Set-Nummer auf den Fotos abgleichen.</p>`);
+    <p class="dnote">Versand stimmt nicht? Den Betrag aus dem eBay-Angebot (Lieferung nach Deutschland) eintragen – das Höchstgebot rechnet sich sofort neu, bei Nicht-EU-Verkäufern inklusive Einfuhrumsatzsteuer auf den Versand. Vor dem Eintragen bei Gixen: Cert-Nummer bei PSA prüfen und Sprache/Set-Nummer auf den Fotos abgleichen.</p>`);
+  const inp = $("#shipin", sheet), save = $("#shipsave", sheet), reset = $("#shipreset", sheet), err = $("#shiperr", sheet);
+  const show = kk => {
+    $("#cbid", sheet).textContent = eur(kk.bid);
+    $("#clanded", sheet).textContent = eur(kk.landed, 2);
+    $("#shipsrc", sheet).textContent = SHIP_SRC[kk.source] || "";
+    $("#ctoohigh", sheet).hidden = !kk.tooHigh;
+  };
+  inp.oninput = () => {
+    const v = Number(String(inp.value).replace(",", "."));
+    if (!(v >= 0) || inp.value === "") { save.disabled = true; return; }
+    show(calcCand(x, v));
+    save.disabled = Math.abs(v - k.ship) < 0.005 && k.manual != null;
+  };
+  const store = async val => {
+    save.disabled = true; reset.disabled = true; err.textContent = "";
+    const { error } = await db.from("snipe_candidates").update({ shipping_manual_eur: val }).eq("item_id", x.item_id);
+    reset.disabled = false;
+    if (error) {
+      err.textContent = /shipping_manual_eur|column|permission|row-level/i.test(error.message)
+        ? "Bitte zuerst snipe-update-3.sql im Supabase SQL Editor ausführen." : "Speichern fehlgeschlagen: " + error.message;
+      save.disabled = false;
+      return;
+    }
+    x.shipping_manual_eur = val;
+    state.dirty = true;
+    openCand(x.item_id);
+  };
+  save.onclick = () => store(Math.round(Number(String(inp.value).replace(",", ".")) * 100) / 100);
+  reset.onclick = () => store(null);
   $("#copyid", sheet).onclick = async e => {
     try { await navigator.clipboard.writeText(x.item_id); e.target.textContent = "Kopiert ✓"; }
-    catch (err) { e.target.textContent = x.item_id; }
+    catch (er) { e.target.textContent = x.item_id; }
   };
 }
 
@@ -860,46 +853,14 @@ function openCard(id) {
   const st = c.comps_stats || {};
   const off = st.offer_details || {};
   const live = state.cands.filter(x => x.card_id === id && new Date(x.end_at) > Date.now());
-  // Kartenbild: gespeichertes Bild (TCGdex oder eigener Link), sonst das Foto des neuesten passenden Verkaufs
-  let art = null;
-  if (c.image) art = { small: c.image, big: c.image.replace(/\/low\.(webp|png|jpg)$/, "/high.$1") };
-  else {
-    const withImg = [...used, ...all].find(x => ebayImg(x.image, 500));
-    if (withImg) art = { small: ebayImg(withImg.image, 500), big: ebayImg(withImg.image, 1600), photo: true };
-  }
   const sheet = openSheet(`
     <header class="sheet-head"><h2>${esc(c.name)}</h2><button class="ghost" data-close>Schließen</button></header>
-    <div class="ctop">
-      ${art ? `<a class="cart${art.photo ? " photo" : ""}" href="${esc(art.big)}" target="_blank" rel="noopener" title="Bild groß ansehen"><img src="${esc(art.small)}" alt="${esc(c.name)}" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></a>` : ""}
-      <div>
-        <p class="dprice">${c.fair_eur != null ? eur(c.fair_eur) : "–"}</p>
-        <p class="dsmall muted" style="margin:0 0 10px">Fairwert PSA 10 · ${c.fair_n ? `Median aus ${c.fair_n} Verkäufen` : "noch zu wenige Verkäufe"}${c.comps_source ? " · " + esc(c.comps_source) : ""} · Stand ${esc(ago(c.comps_at))}</p>
-        ${art && art.photo ? `<p class="dsmall muted" style="margin:0">Bild: Foto aus einem Verkauf</p>` : ""}
-      </div>
-    </div>
+    <p class="dprice">${c.fair_eur != null ? eur(c.fair_eur) : "–"}</p>
+    <p class="dsmall muted" style="margin:0 0 10px">Fairwert PSA 10 · ${c.fair_n ? `Median aus ${c.fair_n} Verkäufen` : "noch zu wenige Verkäufe"}${c.comps_source ? " · " + esc(c.comps_source) : ""} · Stand ${esc(ago(c.comps_at))}</p>
     <dl class="dstats">
-    </dl>
-    <div class="discbox">
-      <div class="discrow"><label for="disc">Abschlag</label><output id="discout">${Math.round(Number(c.discount || 0) * 100)} %</output></div>
-      <input id="disc" type="range" min="0" max="50" step="1" value="${Math.round(Number(c.discount || 0) * 100)}" aria-label="Abschlag in Prozent">
-      <p class="dsmall muted" id="discnote">${c.origin === "app" ? "Wird gespeichert und gilt ab dem nächsten Scout-Lauf auch für die Treffer." : "Karte aus der watchlist.yaml: nur Vorschau, gespeichert wird dort."}</p>
-    </div>
-    <table class="bidtab">
-      <thead><tr><th scope="col">Verkäufer aus</th><th scope="col" class="num">Höchstgebot</th><th scope="col" class="num">Versand</th></tr></thead>
-      <tbody>
-        <tr class="mine"><th scope="row">Deutschland<small>inkl. MwSt.</small></th><td class="num big" id="bid-de">–</td>
-          <td class="num"><input id="shipde" class="shipin" type="number" min="0" max="99" step="0.5" value="${shipDE}" inputmode="decimal" aria-label="Inlandsversand in Euro"> €</td></tr>
-        <tr><th scope="row">EU<small>inkl. MwSt.</small></th><td class="num big" id="bid-eu">–</td>
-          <td class="num"><input id="shipeu" class="shipin" type="number" min="0" max="199" step="0.5" value="${shipEU}" inputmode="decimal" aria-label="EU-Versand in Euro"> €</td></tr>
-        <tr><th scope="row">USA<small>Gebot, zzgl. 19 % EUSt</small></th><td class="num big" id="bid-us">–</td>
-          <td class="num"><input id="shipus" class="shipin" type="number" min="0" max="199" step="1" value="${shipUS}" inputmode="decimal" aria-label="Versand aus den USA in Euro"> €</td></tr>
-      </tbody>
-    </table>
-    <p class="dsmall muted" id="zollnote" hidden>Über 150 € Warenwert kann bei US-Sendungen zusätzlich Zoll anfallen, der hier nicht eingerechnet ist.</p>
-    <p class="dsmall muted">Versandwerte sind Schätzungen und gelten für alle Karten. Höchstgebot + Versand bleibt unter Fairwert minus Abschlag und unter deinem Budget.</p>
-    <dl class="dstats">
+      <div class="drow mine"><dt>Höchstgebot (Richtwert)</dt><dd>${eur(c.max_bid_eur)} <small>bei EU-Versand</small></dd></div>
       <div class="drow"><dt>Spanne</dt><dd>${c.fair_low != null ? `${eur(c.fair_low)} – ${eur(c.fair_high)}` : "–"}</dd></div>
-      <div class="drow"><dt>Richtwert des Scouts (EU)</dt><dd>${eur(c.max_bid_eur)} <small>beim letzten Lauf</small></dd></div>
+      <div class="drow"><dt>Sicherheitsabschlag</dt><dd>${Math.round(Number(c.discount || 0) * 100)} %</dd></div>
       <div class="drow"><dt>Budgetgrenze inkl. Versand</dt><dd>${c.max_total_eur ? eur(c.max_total_eur) : "keine"}</dd></div>
       ${off.angefragt ? `<div class="drow"><dt>Preisvorschläge geprüft</dt><dd>${off["Betrag ermittelt"] || 0} von ${off.angefragt} <small>gezahlter Betrag ermittelt</small></dd></div>` : ""}
       <div class="drow"><dt>Laufende Treffer</dt><dd>${live.length}</dd></div>
@@ -921,70 +882,19 @@ function openCard(id) {
         ${all.length > used.length ? `<label class="toggle"><input type="checkbox" id="showoff" style="width:auto;display:inline;margin:0"> Ausreißer zeigen</label>` : ""}</div>
         <ul class="sales" id="slist">${used.map(s => saleLi(s, false)).join("")}</ul>` : ""}
     </section>`);
+  wireCardActions(sheet, c);
   // Ausreißer sind standardmäßig ausgeblendet, damit sie die Preisachse nicht strecken
-  let chartList = used.length ? used : all;
-  const redraw = () => { if (all.length) drawChart($("#chart", sheet), chartList, { ...c, max_bid_eur: deBid(c) }); };
-  wireCardActions(sheet, c, redraw);
-  redraw();
+  if (all.length) drawChart($("#chart", sheet), used.length ? used : all, c);
   const so = $("#showoff", sheet);
   if (so) so.onchange = () => {
-    chartList = so.checked ? all : used;
-    $("#slist", sheet).innerHTML = chartList.map(s => saleLi(s, false)).join("");
+    const list = so.checked ? all : used;
+    $("#slist", sheet).innerHTML = list.map(s => saleLi(s, false)).join("");
     $("#lgoff", sheet).hidden = !so.checked;
-    redraw();
+    drawChart($("#chart", sheet), list, c);
   };
 }
 
-function wireCardActions(sheet, c, redraw) {
-  // Alle drei Höchstgebote sofort neu rechnen (Regler, Versandfelder)
-  const paint = () => {
-    const show = (id, v) => { const el = $(id, sheet); if (el) el.textContent = v != null ? eur(v) : "–"; };
-    show("#bid-de", deBid(c)); show("#bid-eu", euBid(c)); show("#bid-us", usBid(c));
-    const u = usBid(c), zn = $("#zollnote", sheet);
-    if (zn) zn.hidden = !(u != null && u * 1.19 > 150);
-    if (redraw) redraw();
-    state.dirty = true; // die Liste dahinter zeigt dieselben Werte
-  };
-  const shipField = (sel, key, max, setter) => {
-    const el = $(sel, sheet);
-    if (!el) return;
-    el.oninput = () => {
-      const v = parseFloat(String(el.value).replace(",", "."));
-      if (!(v >= 0 && v < max)) return;
-      setter(v);
-      try { localStorage.setItem(key, String(v)); } catch (e) { /* nur für diese Sitzung */ }
-      paint();
-    };
-  };
-  shipField("#shipde", "snipe_ship_de", 100, v => { shipDE = v; });
-  shipField("#shipeu", "snipe_ship_eu", 200, v => { shipEU = v; });
-  shipField("#shipus", "snipe_ship_us", 200, v => { shipUS = v; });
-  // Abschlag: sofort rechnen, kurz nach dem Loslassen speichern (nur Karten aus der App)
-  const disc = $("#disc", sheet), out = $("#discout", sheet), note = $("#discnote", sheet);
-  let saveTimer = 0;
-  const fill = () => disc && disc.style.setProperty("--p", `${(Number(disc.value) / Number(disc.max)) * 100}%`);
-  fill();
-  if (disc) disc.oninput = () => {
-    fill();
-    const v = Number(disc.value) / 100;
-    c.discount = v;
-    out.textContent = `${disc.value} %`;
-    paint();
-    if (c.origin !== "app") return;
-    clearTimeout(saveTimer);
-    note.textContent = "Wird gespeichert …";
-    saveTimer = setTimeout(async () => {
-      const { error } = await db.from("snipe_cards").update({ discount: v }).eq("id", c.id);
-      if (error) {
-        note.textContent = /permission|denied|policy|security/i.test(error.message)
-          ? "Nicht gespeichert: Bitte snipe-update-abschlag.sql in Supabase ausführen. Bis dahin nur Vorschau."
-          : "Nicht gespeichert: " + error.message;
-        return;
-      }
-      note.textContent = "Gespeichert. Gilt ab dem nächsten Scout-Lauf auch für die Treffer.";
-    }, 600);
-  };
-  paint();
+function wireCardActions(sheet, c) {
   const tg = $("#toggleact", sheet), del = $("#delcard", sheet), err = $("#acterr", sheet);
   if (tg) tg.onclick = async () => {
     tg.disabled = true;
@@ -1057,11 +967,10 @@ function openAdd() {
     <p class="muted dsmall" style="margin:0 0 6px">Sprache des Slabs, nach der der Scout suchen soll.</p>
     <div class="seg" id="langseg"><button data-l="en" class="on">Englisch</button><button data-l="de">Deutsch</button></div>
     <div class="searchrow">
-      <input id="q" type="search" placeholder="Name, Set oder Nummer, z. B. Lapras, Crown Zenith oder 202/165" enterkeyhint="search" autocomplete="off">
+      <input id="q" type="search" placeholder="Name oder Nummer, z. B. Lapras oder 202/165" enterkeyhint="search" autocomplete="off">
       <button id="sbtn" class="primary">Suchen</button>
     </div>
-    <div id="res"></div>
-    <p class="dsmall" style="margin-top:14px"><button class="linkish" id="manual">Karte nicht gefunden? Manuell anlegen</button></p>`);
+    <div id="res"></div>`);
   const res = $("#res", sheet);
 
   sheet.querySelectorAll("#langseg button").forEach(b => b.onclick = () => {
@@ -1070,104 +979,28 @@ function openAdd() {
     res.innerHTML = ""; s.results = []; s.picked = null;
   });
 
-  // setHits: passende Sets zur Eingabe, oberhalb der Karten; ein Tipp zeigt alle Karten des Sets
-  function showResults(list, msg, setHits = []) {
+  function showResults(list, msg) {
     s.results = list;
-    const setsHtml = setHits.length ? `<div class="sethits"><h4>Sets</h4><ul class="results">${setHits.map(x => `<li><button class="pick setpick" data-set="${esc(x.id)}">
-        <span class="seticon" aria-hidden="true">${x.symbol ? `<img src="${esc(x.symbol)}.png" alt="" loading="lazy" onerror="this.remove()">` : ""}</span>
-        <span><b>${esc(x.name)}</b><small>${x.count ? `${x.count} Karten · ` : ""}alle Karten anzeigen</small></span><span class="chevr" aria-hidden="true">›</span></button></li>`).join("")}</ul></div>` : "";
-    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${msg}</p>` : ""}${setsHtml}${list.length ? `${setHits.length ? `<h4 class="reshead">Karten</h4>` : ""}<ul class="results">${list.map(c => `<li><button class="pick" data-id="${esc(c.id)}">
+    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${msg}</p>` : ""}${list.length ? `<ul class="results">${list.map(c => `<li><button class="pick" data-id="${esc(c.id)}">
         ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'noimg'}))">` : `<span class="noimg"></span>`}
         <span><b>${esc(c.name)}</b><small>${esc(c.setName || setIdFromCardId(c.id, c.localId))}, Nr. ${esc(c.localId)}</small></span></button></li>`).join("")}</ul>` : ""}`;
-    res.querySelectorAll(".pick:not(.setpick)").forEach(b => b.onclick = () => pick(b.dataset.id));
-    res.querySelectorAll(".setpick").forEach(b => b.onclick = () => openSet(b.dataset.set, setHits.find(x => x.id === b.dataset.set)));
+    res.querySelectorAll(".pick").forEach(b => b.onclick = () => pick(b.dataset.id));
   }
-
-  // Sets, deren Name zur Eingabe passt (auch über den Setnamen der anderen Sprache, z. B. "Crown Zenith")
-  function matchSets(sets, alias, q) {
-    const words = norm(q).trim().split(/\s+/).filter(Boolean);
-    if (norm(q).trim().length < 3) return [];
-    const aliasName = new Map((alias || []).map(x => [x.id, x.name]));
-    return sets.filter(x => { const hay = norm(`${x.name} ${aliasName.get(x.id) || ""} ${x.id}`); return words.every(w => hay.includes(w)); })
-      .reverse().slice(0, 12)
-      .map(x => ({ id: x.id, name: x.name, symbol: x.symbol || null, count: x.cardCount && (x.cardCount.total || x.cardCount.official) || null }));
-  }
-
-
-  // "Lapras Crown Zenith" oder "Crown Zenith Lapras": Eingabe in Kartenname und Set aufteilen, alle Aufteilungen
-  // durchprobieren (längster Name zuerst) und nur Karten aus den passenden Sets zeigen
-  async function nameInSet(q, sets, alias) {
-    const w = q.trim().split(/\s+/);
-    if (w.length < 2) return null;
-    const splits = [];
-    for (let k = w.length - 1; k >= 1; k--) {
-      splits.push([w.slice(0, k).join(" "), w.slice(k).join(" ")]); // Name zuerst
-      splits.push([w.slice(w.length - k).join(" "), w.slice(0, w.length - k).join(" ")]); // Set zuerst
-    }
-    for (const [namePart, setPart] of splits) {
-      const sh = matchSets(sets, alias, setPart);
-      if (!sh.length || namePart.length < 2) continue;
-      const ids = new Set(sh.map(x => x.id));
-      const cards = await tcg(`${s.lang}/cards?name=${encodeURIComponent(namePart)}&pagination:page=1&pagination:itemsPerPage=250`).catch(() => []);
-      const inSet = cards.filter(c => ids.has(setIdFromCardId(c.id, c.localId)));
-      if (inSet.length) return { list: inSet, namePart, sets: sh };
-    }
-    return null;
-  }
-  // Alle Karten eines Sets, nach Nummer sortiert (Buchstaben-Nummern wie GG05 hinten)
-  async function openSet(id, info) {
-    res.innerHTML = `<p class="muted">Set wird geladen …</p>`;
-    try {
-      const d = await tcg(`${s.lang}/sets/${encodeURIComponent(id)}`);
-      const cards = (d && d.cards) || [];
-      if (!cards.length) { res.innerHTML = `<p class="muted">Zu diesem Set liefert TCGdex keine Kartenliste.</p>`; return; }
-      const key = x => { const m = String(x.localId).match(/^([A-Za-z]*)(\d+)(.*)$/); return m ? [m[1] ? 1 : 0, m[1], Number(m[2]), m[3]] : [2, String(x.localId), 0, ""]; };
-      cards.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1].localeCompare(y[1]) || x[2] - y[2] || x[3].localeCompare(y[3]); });
-      showResults(cards.map(c => ({ ...c, setName: d.name })), `${esc((info && info.name) || d.name)}: ${cards.length} Karten. Tippe die gewünschte an.`);
-      res.scrollIntoView({ block: "start", behavior: "smooth" });
-    } catch (e) { res.innerHTML = `<p class="err">Set konnte nicht geladen werden: ${esc(e.message)}</p>`; }
-  }
-
-  // Nummernvergleich ohne führende Nullen: "GG05" = "GG5", "006" = "6"
-  const numKey = x => String(x ?? "").trim().toUpperCase().replace(/^([A-Z]*)0*(\d)/, "$1$2");
 
   async function search() {
     const raw = $("#q", sheet).value.trim();
-    // "202/165", aber auch Nummern mit Buchstaben wie "GG05/GG70" (Galarian Gallery), "TG12/TG30", "RC5/RC32"
-    const num = raw.match(/\b([A-Za-z]{0,4}\d{1,3})\s*\/\s*[A-Za-z]{0,4}(\d{1,3})\b/);
-    if (num) return searchByNumber(num[1].toUpperCase(), Number(num[2]), raw.replace(num[0], "").trim());
-    // "Lapras GG05": Name plus Nummer ohne Setgröße, Treffer nach der Nummer filtern
-    const loose = raw.match(/^(.*\S)\s+#?([A-Za-z]{0,4}\d{1,3})$/);
-    const nameQ = loose && /[A-Za-zÄÖÜäöüß]{2}/.test(loose[1]) ? loose[1] : raw;
-    const numQ = loose && nameQ !== raw ? loose[2] : null;
+    const num = raw.match(/(\d+)\s*\/\s*(\d+)/);
+    if (num) return searchByNumber(num[1], Number(num[2]), raw.replace(num[0], "").trim());
     if (raw.length < 2) return;
     res.innerHTML = `<p class="muted">Suche läuft …</p>`;
     try {
-      let [list, sets, altSets] = await Promise.all([
-        tcg(`${s.lang}/cards?name=${encodeURIComponent(nameQ)}&pagination:page=1&pagination:itemsPerPage=250`).catch(() => []),
-        setsFor(s.lang).catch(() => []),
-        setsFor(s.lang === "en" ? "de" : "en").catch(() => [])
+      const [list, sets] = await Promise.all([
+        tcg(`${s.lang}/cards?name=${encodeURIComponent(raw)}&pagination:page=1&pagination:itemsPerPage=40`),
+        setsFor(s.lang).catch(() => [])
       ]);
-      if (numQ) {
-        const hit = list.filter(c => numKey(c.localId) === numKey(numQ));
-        if (hit.length) list = hit;
-      }
-      let setHits = numQ ? [] : matchSets(sets, altSets, raw);
-      if (!list.length) {
-        const combo = await nameInSet(nameQ, sets, altSets);
-        if (combo) {
-          list = combo.list; setHits = [];
-          if (numQ) { const hit = list.filter(c => numKey(c.localId) === numKey(numQ)); if (hit.length) list = hit; }
-        }
-      }
-      if (!list.length && setHits.length === 1) return openSet(setHits[0].id, setHits[0]);
-      if (!list.length && !setHits.length) { res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, den Setnamen, die Nummer (z. B. 202/165 oder GG05/GG70) oder die andere Sprache.</p>`; return; }
+      if (!list.length) { res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, die Nummer (z. B. 202/165) oder die andere Sprache.</p>`; return; }
       const byId = new Map(sets.map(x => [x.id, x.name]));
-      // neueste Sets zuerst (Reihenfolge der TCGdex-Setliste)
-      const order = new Map(sets.map((x, i) => [x.id, i]));
-      list.sort((a, b) => (order.get(setIdFromCardId(b.id, b.localId)) ?? -1) - (order.get(setIdFromCardId(a.id, a.localId)) ?? -1));
-      showResults(list.slice(0, 120).map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })),
-        list.length > 120 ? `${list.length} Karten gefunden, die neuesten 120. Mit Nummer geht es schneller, z. B. „${esc(nameQ)} GG05“ oder „GG05/GG70“.` : "", setHits);
+      showResults(list.map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })));
     } catch (e) { res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`; }
   }
 
@@ -1177,10 +1010,7 @@ function openAdd() {
     try {
       const sets = await setsFor(s.lang);
       const cands = sets.filter(x => x.cardCount && Number(x.cardCount.official) === official).slice(0, 12);
-      if (!cands.length) {
-        if (nameFilter) { $("#q", sheet).value = `${nameFilter} ${localNum}`; return search(); } // z. B. Tippfehler bei der Setgröße
-        res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache, oder suche mit Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`; return;
-      }
+      if (!cands.length) { res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache.</p>`; return; }
       const variants = [...new Set([localNum, localNum.replace(/^0+(?=\d)/, ""), localNum.padStart(3, "0")])];
       const found = [];
       for (const set of cands) {
@@ -1193,10 +1023,7 @@ function openAdd() {
       }
       const nf = norm(nameFilter);
       const list = nf ? found.filter(c => norm(c.name).includes(nf)) : found;
-      if (!list.length) {
-        if (nameFilter) { $("#q", sheet).value = `${nameFilter} ${localNum}`; return search(); }
-        res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden. Versuche Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`; return;
-      }
+      if (!list.length) { res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden.</p>`; return; }
       showResults(list);
     } catch (e) { res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`; }
   }
@@ -1207,48 +1034,6 @@ function openAdd() {
       const c = await tcg(`${s.lang}/cards/${encodeURIComponent(id)}`);
       // Name in der anderen Sprache als Alternative (z. B. venusaur|bisaflor), Titel sind oft gemischt
       const other = await tcg(`${s.lang === "en" ? "de" : "en"}/cards/${encodeURIComponent(id)}`).catch(() => null);
-      renderPicked(c, other, null);
-    } catch (e) { res.innerHTML = `<p class="err">Karte konnte nicht geladen werden: ${esc(e.message)}</p>`; }
-  }
-
-  // Karte ohne TCGdex-Eintrag (neues Set, Promo, Exot): Angaben selbst eintragen, danach dasselbe Formular
-  function manualForm() {
-    res.innerHTML = `
-      ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
-      <h3 style="margin:14px 0 4px">Karte manuell anlegen</h3>
-      <p class="muted dsmall" style="margin:0">Für Karten, die TCGdex noch nicht kennt, z. B. aus einem neuen Set. Sprache wie oben gewählt (${s.lang === "en" ? "Englisch" : "Deutsch"}).</p>
-      <div class="addform">
-        <label>Name auf der Karte<input id="mname" placeholder="z. B. Growlithe" autocomplete="off"></label>
-        <label>Name in der anderen Sprache (optional)<input id="malt" placeholder="${s.lang === "en" ? "z. B. Fukano" : "z. B. Growlithe"}" autocomplete="off">
-          <small class="hint">Verkäufer schreiben oft beide Namen in den Titel.</small></label>
-        <label>Set<input id="mset" placeholder="z. B. Delta Reign" autocomplete="off"></label>
-        <div class="two">
-          <label>Nummer<input id="mnum" placeholder="z. B. 106 oder GG05" autocomplete="off"></label>
-          <label>Setgröße (optional)<input id="mtot" type="number" min="1" max="999" placeholder="z. B. 103" inputmode="numeric"></label>
-        </div>
-        <label>Bildlink (optional)<input id="mimg" type="url" placeholder="https://…" autocomplete="off"></label>
-        <button id="mnext" class="primary wide" style="margin-top:18px">Weiter</button>
-        <p class="err" id="merr"></p>
-      </div>`;
-    const back = $("#back", sheet);
-    if (back) back.onclick = () => showResults(s.results);
-    $("#mname", sheet).focus();
-    $("#mnext", sheet).onclick = () => {
-      const name = $("#mname", sheet).value.trim(), alt = $("#malt", sheet).value.trim();
-      const setName = $("#mset", sheet).value.trim(), num = $("#mnum", sheet).value.trim().toUpperCase();
-      const tot = parseInt($("#mtot", sheet).value, 10), img = $("#mimg", sheet).value.trim();
-      const err = $("#merr", sheet);
-      if (!name || !num) { err.textContent = "Bitte mindestens Name und Nummer eintragen."; return; }
-      if (!/^[A-Z]{0,4}\d{1,3}[A-Z]?$/.test(num)) { err.textContent = "Nummer bitte ohne Setgröße eintragen, z. B. 106 oder GG05."; return; }
-      if (img && !/^https:\/\//i.test(img)) { err.textContent = "Der Bildlink muss mit https:// beginnen."; return; }
-      const c = { id: null, name, localId: /^\d+$/.test(num) ? String(parseInt(num, 10)).padStart(3, "0") : num, rarity: "manuell angelegt",
-        set: { id: "manuell", name: setName, cardCount: { official: tot > 0 ? tot : null } } };
-      renderPicked(c, alt ? { name: alt } : null, img || null);
-    };
-  }
-
-  function renderPicked(c, other, imgOverride) {
-    {
       s.picked = c;
       // Offizielle Setgröße nur bei reinen Zahlen (GG05, TG12 usw. haben eigene Zählungen)
       const official = /^\d+$/.test(String(c.localId)) ? (c.set && c.set.cardCount && c.set.cardCount.official) : null;
@@ -1259,10 +1044,8 @@ function openAdd() {
       const display = `${c.name} ${official ? nums.search : c.localId}${setName ? ` (${setName})` : ""} ${s.lang.toUpperCase()}`;
       const searchTerm = `${c.name} ${nums.search} PSA 10`;
       const warns = criteriaWarnings(c);
-      const imgUrl = imgOverride || (c.image ? `${c.image}/low.webp` : null);
-      // Ball-Muster laut TCGdex (variants_detailed, Folie "pokeball"/"masterball")
-      const balls = [...new Set((c.variants_detailed || []).map(x => x && x.foil).filter(f => BALLS[f]))];
-      const exists = c.id ? state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang) : null;
+      const imgUrl = c.image ? `${c.image}/low.webp` : null;
+      const exists = state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang);
       res.innerHTML = `
         ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
         <div class="preview">
@@ -1276,10 +1059,6 @@ function openAdd() {
         ${warns.length ? `<p class="critwarn" role="note"><b>Abweichung von deinen bisherigen Kriterien:</b> ${esc(warns.join("; "))}. Hinzufügen geht trotzdem.</p>` : ""}
         ${exists ? `<p class="critwarn" role="note"><b>Schon in deiner Liste</b>${exists.active ? "" : " (pausiert)"}: ${esc(exists.name)}.</p>` : ""}
         <div class="addform">
-          <label>Variante<select id="fvar">
-              <option value="">Standard${balls.length ? " (ohne Ball-Muster)" : ""}</option>
-              ${Object.entries(BALLS).map(([v, b]) => `<option value="${v}">${b.label}${balls.includes(v) ? " (bei dieser Karte bekannt)" : ""}</option>`).join("")}
-            </select><small class="hint">${balls.length ? "Diese Karte gibt es auch mit Poké-Ball- oder Master-Ball-Muster (Reverse Holo). Die Varianten werden getrennt gehandelt." : "Poké Ball / Master Ball nur bei Sets mit Ball-Muster, z. B. 151, Prismatische Entwicklungen, Schwarzer Blitz / Weiße Flamme."}</small></label>
           <label>Name in der Übersicht<input id="fname" value="${esc(display)}"></label>
           <label>eBay-Suchbegriff<input id="fsearch" value="${esc(searchTerm)}">
             <small class="hint">Damit sucht der Scout laufende Auktionen und verkaufte Exemplare.</small></label>
@@ -1296,25 +1075,11 @@ function openAdd() {
         </div>`;
       const back = $("#back", sheet);
       if (back) back.onclick = () => showResults(s.results);
-      // Variante wählen: Suchbegriff, Pflicht- und Ausschlussbegriffe passend vorbelegen
-      const base = { name: display, search: searchTerm, must: [nameTerm, nums.must].filter(Boolean).join(", ") };
-      const ALLBALL = "master ball, masterball, poke ball, pokeball, poké ball";
-      const applyVar = () => {
-        const v = $("#fvar", sheet).value, b = BALLS[v];
-        $("#fname", sheet).value = b ? `${base.name} ${b.label}` : base.name;
-        $("#fsearch", sheet).value = b ? base.search.replace(/\s*PSA 10$/i, ` ${b.search} PSA 10`) : base.search;
-        $("#fmust", sheet).value = b ? `${base.must}, ${b.must}` : base.must;
-        const ex = $("#fexcl", sheet);
-        // Standard in einem Set mit Ball-Mustern: die teureren Varianten ausschließen; Ball-Variante: die andere ausschließen
-        ex.value = !b ? (balls.length ? ALLBALL : "") : v === "pokeball" ? "master ball, masterball" : "poke ball, pokeball, poké ball";
-      };
-      $("#fvar", sheet).onchange = applyVar;
-      if (balls.length) applyVar();
-      $("#save", sheet).onclick = () => save(c, imgUrl, setName, official, $("#fvar", sheet).value || null);
-    }
+      $("#save", sheet).onclick = () => save(c, imgUrl, setName, official);
+    } catch (e) { res.innerHTML = `<p class="err">Karte konnte nicht geladen werden: ${esc(e.message)}</p>`; }
   }
 
-  async function save(c, imgUrl, setName, official, variant) {
+  async function save(c, imgUrl, setName, official) {
     const btn = $("#save", sheet), err = $("#saveerr", sheet);
     const list = v => v.split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
     const name = $("#fname", sheet).value.trim(), search = $("#fsearch", sheet).value.trim();
@@ -1326,7 +1091,7 @@ function openAdd() {
     if (!(disc >= 0 && disc <= 60)) { err.textContent = "Abschlag bitte zwischen 0 und 60 %."; return; }
     btn.disabled = true; err.textContent = "";
     const row = {
-      id: slug(`${keyName(c.name)} ${c.localId} ${c.set ? c.set.id : ""} ${s.lang}${variant ? " " + variant : ""}`),
+      id: slug(`${keyName(c.name)} ${c.localId} ${c.set ? c.set.id : ""} ${s.lang}`),
       name, search, must_include: must, must_exclude: excl.length ? excl : null, language: s.lang,
       discount: disc / 100, max_total_eur: cap > 0 ? cap : null, active: true, origin: "app",
       tcgdex_id: c.id, set_name: setName || null, card_number: official ? `${c.localId}/${official}` : String(c.localId),
@@ -1347,7 +1112,6 @@ function openAdd() {
   }
 
   $("#sbtn", sheet).onclick = search;
-  $("#manual", sheet).onclick = manualForm;
   $("#q", sheet).addEventListener("keydown", e => { if (e.key === "Enter") search(); });
   $("#q", sheet).focus();
 }
