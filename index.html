@@ -311,6 +311,16 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .pick img,.noimg{width:44px;height:61px;object-fit:contain;border-radius:4px;flex:none}
 .noimg{background:var(--fill)}
 .pick small{display:block;color:var(--muted)}
+.costbox{margin-top:14px}
+.costbox.fwide{grid-column:1/-1;margin-top:0}
+.costrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end}
+.costrow label,.costrow3 label{margin-top:0}
+.costrow3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:end;margin-top:10px}
+.costbox .dsmall{margin:6px 0 0}
+.impcalc{margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--fill)}
+.impcalc summary{cursor:pointer;font-size:14px;font-weight:500;color:var(--accent)}
+.impcalc .ghost{margin-top:8px}
+@media (max-width:420px){.costrow3{grid-template-columns:1fr 1fr}.costrow3 label:last-child{grid-column:1/-1}}
 .mhead{font-size:20px;margin:14px 0 4px}
 .mrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .manuallink{margin-top:16px}
@@ -1543,15 +1553,16 @@ function exportCsv() {
     return /[;"\n\r]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
   };
   const head = ["Name", "Set", "Jahr", "Nummer", "Sprache", "Zustand", "Grading", "Zertifikat", "Ausführung", "1st Edition", "Menge",
-    "Kaufpreis pro Karte (€)", "Wert pro Karte (€)", "Wert gesamt (€)", "Gewinn/Verlust (€)", "Status", "Verkäufe",
+    "Kartenpreis pro Karte (€)", "Nebenkosten pro Karte (€)", "Wert pro Karte (€)", "Wert gesamt (€)", "Einkauf vs. Marktwert (%)", "Gewinn/Verlust inkl. Nebenkosten (€)", "Status", "Verkäufe",
     "Grundlage", "Wertstand", "eBay-Suchbegriff", "TCGdex-ID", "Hinzugefügt am"];
   const rows = cardRows().sort((a, b) => (b.total ?? -1) - (a.total ?? -1)).map(r => {
     const c = r.c, e = r.e;
-    const pp = c.purchase_price_eur != null ? Number(c.purchase_price_eur) : null;
+    const k = costOf(c);
     return [
       txt(c.name), txt(c.set_name), txt(c.set_name ? setYear(c.set_name) : ""), txt(c.card_number), txt(c.language), txt(isGraded(c) ? "" : c.condition),
       txt(gradeText(c)), txt(isGraded(c) ? c.cert_number || "" : ""), txt((FIN_TEXT[finishOf(c)] || "") + (patternOf(c) ? " " + PATTERN_LABEL[patternOf(c)] : "")), c.first_edition ? "ja" : "nein", c.quantity,
-      num(pp), num(r.unit), num(r.total), num(pp != null && r.unit != null ? (r.unit - pp) * c.quantity : null),
+      num(k ? k.price : null), num(k && k.extra ? k.extra : null), num(r.unit), num(r.total),
+      num(k && r.unit ? (k.price - r.unit) / r.unit * 100 : null), num(k && r.unit != null ? (r.unit - k.total) * c.quantity : null),
       txt(STATUS_LABEL[facetOf("status", r)]), e ? e.n : "", txt(e ? e.basis : ""), txt(e ? fmtDate(e.date) : ""),
       txt(c.ebay_query || ""), txt(c.tcgdex_id || ""), txt(c.created_at ? fmtDate(String(c.created_at).slice(0, 10)) : ""),
     ].join(";");
@@ -1823,17 +1834,79 @@ const fmtPct = v => `${v > 0 ? "+" : v < 0 ? "−" : "±"}${pctFmt.format(Math.a
 const signedEur = v => `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v))}`;
 const trendCls = v => (v > 0.05 ? "up" : v < -0.05 ? "down" : "");
 
+// Eingabefelder Kartenpreis und Nebenkosten (Hinzufügen und Bearbeiten), mit Rechenhilfe für Importe
+const COSTS_UPDATE_MSG = "Nebenkosten: Bitte zuerst update-nebenkosten.sql in Supabase ausführen, dann erneut speichern.";
+function costFieldsHtml(c, cls = "") {
+  const pp = c && c.purchase_price_eur != null ? Number(c.purchase_price_eur) : "";
+  const ex = c && c.extra_costs_eur != null ? Number(c.extra_costs_eur) : "";
+  return `<div class="costbox ${cls}">
+    <div class="costrow">
+      <label>Kartenpreis pro Karte in € <small class="muted">(optional)</small><input id="pp" type="number" min="0" step="0.01" inputmode="decimal" value="${pp}" placeholder="inkl. Steuer"></label>
+      <label>Nebenkosten pro Karte in € <small class="muted">(optional)</small><input id="pxc" type="number" min="0" step="0.01" inputmode="decimal" value="${ex}" placeholder="Versand, Zoll …"></label>
+    </div>
+    <p class="muted dsmall">Kartenpreis: was die Karte selbst gekostet hat, inklusive Steuer, so ist er mit dem Marktwert vergleichbar. Nebenkosten: Versand, Steuer auf den Versand, Zoll, Gebühren. Bei mehreren Exemplaren jeweils pro Karte.</p>
+    <details class="impcalc"><summary>Rechenhilfe für Importe (USA, Japan …)</summary>
+      <div class="costrow3">
+        <label>Gebot / Preis in €<input id="ic-bid" type="number" min="0" step="0.01" inputmode="decimal"></label>
+        <label>Versand in €<input id="ic-ship" type="number" min="0" step="0.01" inputmode="decimal"></label>
+        <label>Zoll/Gebühren in €<input id="ic-duty" type="number" min="0" step="0.01" inputmode="decimal"></label>
+      </div>
+      <p class="muted dsmall" id="ic-out">Einfuhrumsatzsteuer 19 % auf Preis und Versand. Trägt Kartenpreis = Preis × 1,19 und Nebenkosten = Versand × 1,19 + Zoll ein.</p>
+      <button type="button" class="ghost" id="ic-apply">Übernehmen</button>
+    </details>
+  </div>`;
+}
+function wireCostFields(root) {
+  const btn = root.querySelector("#ic-apply");
+  if (!btn) return;
+  const num = id => { const v = parseFloat(String(root.querySelector(id).value).replace(",", ".")); return Number.isFinite(v) ? v : 0; };
+  const calc = () => {
+    const bid = num("#ic-bid"), ship = num("#ic-ship"), duty = num("#ic-duty");
+    return { price: Math.round(bid * 1.19 * 100) / 100, extra: Math.round((ship * 1.19 + duty) * 100) / 100 };
+  };
+  root.querySelectorAll("#ic-bid,#ic-ship,#ic-duty").forEach(x => x.oninput = () => {
+    const r = calc();
+    root.querySelector("#ic-out").textContent = `Kartenpreis ${eur(r.price)} · Nebenkosten ${eur(r.extra)} · gesamt ${eur(r.price + r.extra)}`;
+  });
+  btn.onclick = () => {
+    const r = calc();
+    if (!r.price) return;
+    root.querySelector("#pp").value = r.price.toFixed(2);
+    root.querySelector("#pxc").value = r.extra ? r.extra.toFixed(2) : "";
+    root.querySelector(".impcalc").open = false;
+  };
+}
+// Nebenkosten nur senden, wenn eingetragen oder geändert (so geht Speichern auch vor update-nebenkosten.sql)
+function extraCostPatch(root, c) {
+  const el = root.querySelector("#pxc");
+  if (!el) return {};
+  const v = el.value === "" ? null : Math.round(Number(el.value) * 100) / 100;
+  const cur = c && c.extra_costs_eur != null ? Number(c.extra_costs_eur) : null;
+  return v === cur ? {} : { extra_costs_eur: v };
+}
+
+// Einkauf pro Karte: Kartenpreis (inkl. Steuer, vergleichbar mit dem Marktwert) und Nebenkosten (Versand, Zoll …)
+function costOf(c) {
+  if (c.purchase_price_eur == null) return null;
+  const price = Number(c.purchase_price_eur), extra = c.extra_costs_eur != null ? Number(c.extra_costs_eur) : 0;
+  return { price, extra, total: price + extra };
+}
+// gain/pct: Gewinn inkl. Nebenkosten; buyPct: Kartenpreis gegenüber Marktwert (negativ = günstiger gekauft)
 function gainOf(rows) {
-  let gain = 0, cost = 0, n = 0;
+  let gain = 0, cost = 0, paid = 0, value = 0, extra = 0, n = 0;
   for (const { c, unit, counted } of rows) {
-    if (c.purchase_price_eur == null || unit == null || !counted) continue;
-    const pp = Number(c.purchase_price_eur);
-    gain += (unit - pp) * c.quantity;
-    cost += pp * c.quantity;
+    const k = costOf(c);
+    if (!k || unit == null || !counted) continue;
+    gain += (unit - k.total) * c.quantity;
+    cost += k.total * c.quantity;
+    paid += k.price * c.quantity;
+    value += unit * c.quantity;
+    extra += k.extra * c.quantity;
     n++;
   }
-  return n ? { gain, n, pct: cost > 0 ? gain / cost * 100 : null } : null;
+  return n ? { gain, n, extra, pct: cost > 0 ? gain / cost * 100 : null, buyPct: value > 0 ? (paid - value) / value * 100 : null } : null;
 }
+const buyText = pct => pct == null ? "" : Math.abs(pct) < 0.5 ? "zum Marktwert gekauft" : `${pctFmt.format(Math.abs(pct))} % ${pct < 0 ? "unter" : "über"} Marktwert gekauft`;
 
 function fmtRange(a, b) {
   const sameYear = a.slice(0, 4) === b.slice(0, 4);
@@ -2016,7 +2089,7 @@ function renderMain() {
           <p class="total">${eur(withProv ? sum + provSum : sum)}</p>
           ${withProv ? `<p class="sub" id="provsum">inklusive ${provRows.length} ${provRows.length === 1 ? "vorläufigem Wert" : "vorläufiger Werte"} mit 1 bis 2 Verkäufen (+${eur(provSum)}, weniger belastbar)</p>` : ""}
           <p class="sub">${qty} ${qty === 1 ? "Karte" : "Karten"}, ${countedRows.length} von ${all.length} Einträgen mit Wert aus mindestens 3 eBay-Verkäufen${last ? ", Stand " + fmtDate(last) : ""}</p>
-          ${g ? `<p class="sub">Gewinn/Verlust zum Kaufpreis: <span class="${trendCls(g.gain)}">${signedEur(g.gain)}${g.pct != null ? ` (${fmtPct(g.pct)})` : ""}</span>, ${g.n} ${g.n === 1 ? "Karte" : "Karten"} mit Kaufpreis</p>` : ""}
+          ${g ? `<p class="sub">Gewinn/Verlust${g.extra ? " inkl. Nebenkosten" : ""}: <span class="${trendCls(g.gain)}">${signedEur(g.gain)}${g.pct != null ? ` (${fmtPct(g.pct)})` : ""}</span>, ${g.n} ${g.n === 1 ? "Karte" : "Karten"} mit Kaufpreis${g.buyPct != null ? ` · im Schnitt ${buyText(g.buyPct)}` : ""}</p>` : ""}
           ${jobStatus().line}
           ${missing ? `<button class="linkish" id="showmissing">${missing} ${missing === 1 ? "Eintrag" : "Einträge"} ohne belastbaren Wert anzeigen</button>` : ""}
         </div>
@@ -2877,12 +2950,13 @@ function openAdd() {
         <p class="muted dsmall">Holo: Das Kartenbild glänzt. Reverse Holo: Die Karte glänzt außerhalb des Bildes, das Bild selbst nicht.</p>
         ${patternFieldHtml(null, ballPatterns)}
         <label class="check"><input id="first" type="checkbox"> <span>1st Edition${v.firstEdition ? " (für diese Karte ist ein 1st-Edition-Druck bekannt)" : ""}<br><small class="muted">Beim eBay-Abgleich zählen dann nur 1st-Edition-Verkäufe.</small></span></label>
-        <label>Kaufpreis pro Karte in EUR (optional)<input id="pp" type="number" min="0" step="0.01" inputmode="decimal"></label>
+        ${costFieldsHtml(null)}
         <button id="save" class="primary wide">Zur Sammlung hinzufügen</button>
         <p class="err" id="saveerr"></p>`;
       $("#save", sheet).onclick = save;
       wireGradeFields(sheet);
       wirePattern(sheet);
+      wireCostFields(sheet);
       if (s.scan && s.scan.card && s.scan.card.grading) prefillGrade(s.scan.card.grading);
       if (s.scan) {
         const sc = s.scan.card;
@@ -2924,6 +2998,7 @@ function openAdd() {
       condition: $("#cond", sheet).value,
       quantity: Math.max(1, parseInt($("#qty", sheet).value, 10) || 1),
       purchase_price_eur: pp === "" ? null : Number(pp),
+      ...extraCostPatch(sheet, null),
       tcgdex_id: c.id,
       image_url: s.imageUrl,
       foil: $("#finish", sheet).value !== "non_holo",
@@ -2955,6 +3030,7 @@ function openAdd() {
         : /set_total|tcg_meta/.test(error.message) ? UPDATE5_MSG
         : /language/.test(error.message) ? JP_UPDATE_MSG
         : /grade|grader|cert_number/.test(error.message) ? GRADE_UPDATE_MSG
+        : /extra_costs/.test(error.message) ? COSTS_UPDATE_MSG
         : "Speichern fehlgeschlagen: " + error.message;
       btn.disabled = false;
       return;
@@ -3068,15 +3144,20 @@ function valueBlockHtml(c, e) {
 function statsHtml(c, e) {
   if (!e) return "";
   const w = (e.d && e.d.windows) || {};
-  const pp = c.purchase_price_eur != null ? Number(c.purchase_price_eur) : null;
+  const k = costOf(c);
   const row = (label, value) => `<div class="drow"><dt>${label}</dt><dd>${value}</dd></div>`;
   const win = (label, x) => row(label, x && x.n ? `${eur(x.median)} <small>${x.n} ${x.n === 1 ? "Verkauf" : "Verkäufe"}</small>` : `<small>kein Verkauf</small>`);
   const out = [win("Median 30 Tage", w.d30), win("Median 90 Tage", w.d90), win("Median 12 Monate", w.d365)];
   if (e.d && e.d.last5 && e.d.last5.n) out.push(win("Letzte 5 Verkäufe", e.d.last5));
-  if (pp != null) out.push(row("Kaufpreis pro Karte", eur(pp)));
-  if (pp != null && e.counts) {
-    const g = (e.unit - pp) * c.quantity;
-    out.push(row("Gewinn/Verlust", `<span class="${trendCls(g)}">${signedEur(g)}${pp > 0 ? ` (${fmtPct((e.unit - pp) / pp * 100)})` : ""}</span>`));
+  if (k) {
+    out.push(row("Kartenpreis pro Karte", eur(k.price)));
+    if (k.extra) out.push(row("Nebenkosten pro Karte", `${eur(k.extra)} <small>Einkauf gesamt ${eur(k.total)}</small>`));
+  }
+  if (k && e.counts) {
+    // fairer Preisvergleich: Kartenpreis gegen Marktwert (beides inkl. Steuer, ohne Versand)
+    if (e.unit > 0) { const bp = (k.price - e.unit) / e.unit * 100; out.push(row("Einkauf zum Marktwert", `<span class="${trendCls(-bp)}">${esc(buyText(bp))}</span>`)); }
+    const g = (e.unit - k.total) * c.quantity;
+    out.push(row(k.extra ? "Gewinn/Verlust inkl. Nebenkosten" : "Gewinn/Verlust", `<span class="${trendCls(g)}">${signedEur(g)}${k.total > 0 ? ` (${fmtPct((e.unit - k.total) / k.total * 100)})` : ""}</span>`));
   }
   return `<dl class="dstats">${out.join("")}</dl>`;
 }
@@ -3127,7 +3208,7 @@ async function openDetail(id) {
         <label class="ffin">Ausführung<select id="finish">${finishOptions(finishOf(c))}</select></label>
         ${patternFieldHtml(patternOf(c), c.tcg_meta && c.tcg_meta.patterns, "fwide")}
         <label>Menge<input id="qty" type="number" min="1" value="${c.quantity}" inputmode="numeric"></label>
-        <label>Kaufpreis pro Karte in €<input id="pp" type="number" min="0" step="0.01" inputmode="decimal" value="${pp != null ? pp : ""}" placeholder="optional"></label>
+        ${costFieldsHtml(c, "fwide")}
         <label class="check fcheck"><input id="first" type="checkbox"${c.first_edition ? " checked" : ""}> 1st Edition</label>
         ${c.language === "JP" ? `<label class="fwide">Sprache der Karte<select id="lang" disabled><option value="JP" selected>Japanisch</option></select>
           <small class="muted">Japanische Karten sind eigene Karten mit eigenen Sets. Für eine andere Sprache die Karte neu hinzufügen.</small></label>
@@ -3372,6 +3453,7 @@ async function openDetail(id) {
 
   wireGradeFields(sheet);
   wirePattern(sheet);
+  wireCostFields(sheet);
   $("#upd", sheet).onclick = async () => {
     const ppv = $("#pp", sheet).value;
     const patch = {
@@ -3379,6 +3461,7 @@ async function openDetail(id) {
       quantity: Math.max(1, parseInt($("#qty", sheet).value, 10) || 1),
       purchase_price_eur: ppv === "" ? null : Number(ppv)
     };
+    Object.assign(patch, extraCostPatch(sheet, c));
     // Spalten nur senden, wenn sich der Wert ändert: so funktioniert Speichern auch vor den SQL-Updates
     const fe = $("#first", sheet).checked;
     if (fe !== Boolean(c.first_edition)) patch.first_edition = fe;
@@ -3431,6 +3514,7 @@ async function openDetail(id) {
         : /finish|condition/.test(error.message) ? UPDATE4_MSG
         : /ebay_query/.test(error.message) ? UPDATE5_MSG
         : /grade|grader|cert_number/.test(error.message) ? GRADE_UPDATE_MSG
+        : /extra_costs/.test(error.message) ? COSTS_UPDATE_MSG
         : "Speichern fehlgeschlagen: " + error.message;
       return;
     }
