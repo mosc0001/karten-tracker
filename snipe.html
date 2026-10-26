@@ -572,7 +572,7 @@ function render() {
           <ul class="list" style="margin-top:8px">${state.cards.filter(c => !c.active).map(cardRow).join("")}</ul></details>` : ""}
       </section>
       <button id="addfab" class="primary fab">+ Karte</button>
-      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU inkl. 19 % Einfuhrumsatzsteuer, also so, wie ein Käufer in Deutschland bezahlt hätte). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
+      <p class="note">Fairwert = Median der passenden PSA-10-Verkäufe auf eBay.de (Ausreißer unter 50 % bzw. über 200 % des Medians bleiben außen vor; angenommene Preisvorschläge mit dem tatsächlich gezahlten Betrag; Verkäufe von außerhalb der EU so, wie ein Käufer in Deutschland bezahlt hätte: 19 % Einfuhrumsatzsteuer werden nur aufgeschlagen, wo sie nicht schon im eBay-Preis steckt – bei Auktionen und UK-Sofortkäufen, bei Preisvorschlägen laut Detailseite). Höchstgebot = Fairwert minus Abschlag minus geschätzter Versand, höchstens bis zu deiner Budgetgrenze. Bei konkreten Treffern rechnet der Scout mit dem echten Versand und – bei Verkäufern außerhalb der EU – mit Einfuhrumsatzsteuer.</p>
     </div>`;
 
   wire();
@@ -671,7 +671,7 @@ function originText(s) {
   const parts = [];
   const o = origPrice(s); if (o) parts.push(o);
   if (s.country && s.country !== "DE") parts.push(COUNTRY[s.country] || s.country);
-  if (s.import_vat) parts.push("inkl. 19 % EUSt");
+  if (s.import_vat) parts.push("+19 % EUSt aufgeschlagen");
   return parts.join(" · ");
 }
 
