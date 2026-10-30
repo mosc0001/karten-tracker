@@ -348,9 +348,13 @@ async function main() {
       if (!sale.soldAt) continue;
       const key = saleKey(sale);
       if (have.has(key)) {
-        // schon gespeichert: nichts überschreiben, nur ein fehlendes Bild aus der Suchzeile übernehmen
+        // schon gespeichert: nichts überschreiben, nur fehlendes Bild und fehlende Herkunft aus der Suchzeile übernehmen
         const old = have.get(key);
-        if (sale.image && !(old.parsed && old.parsed.image)) imagePatch.set(`${c.id}|${key}`, { ...old, parsed: { ...(old.parsed || {}), image: sale.image } });
+        const p0 = old.parsed || {};
+        const add = {};
+        if (sale.image && !p0.image) add.image = sale.image;
+        if (!("country" in p0) && sale.country !== undefined) { add.country = sale.country; add.location = sale.location; }
+        if (Object.keys(add).length) imagePatch.set(`${c.id}|${key}`, { ...old, parsed: { ...p0, ...add } });
         continue;
       }
       if (seen.has(key)) continue;
@@ -420,7 +424,7 @@ async function main() {
     out.set(`${dbRow.card_id}|${saleKey(sale)}`, dbRow);
   }
   for (const [k, r] of imagePatch) if (!out.has(k)) out.set(k, r);
-  if (imagePatch.size) log(`Bilder aus erneut gefundenen Verkäufen übernommen: ${imagePatch.size}.`);
+  if (imagePatch.size) log(`Bild oder Herkunft aus erneut gefundenen Verkäufen übernommen: ${imagePatch.size}.`);
   if (out.size) await upsert("ebay_sales", [...out.values()], "card_id,item_id,sold_at,price_eur");
   log(`${out.size} Verkäufe gespeichert oder aktualisiert.`);
 
