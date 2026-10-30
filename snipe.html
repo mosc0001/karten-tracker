@@ -795,7 +795,7 @@ function openCand(itemId) {
       <div class="drow"><dt>Versand nach DE</dt><dd class="shipedit">
         <input id="shipin" type="number" min="0" step="0.01" inputmode="decimal" value="${k.ship.toFixed(2)}" aria-label="Versandkosten in Euro"> €
         <small id="shipsrc">${esc(SHIP_SRC[k.source] || "")}</small></dd></div>
-      <div class="drow"><dt>Herkunft</dt><dd>${esc(x.country || "?")}${k.nonEu ? ` <small>Nicht-EU: ${Math.round(k.vat * 100)} % EUSt auf Gebot + Versand${k.duty ? `, ${Math.round(k.duty * 1000) / 10} % Zoll` : ""}, ${eur(k.fee)} Pauschale</small>` : ""}</dd></div>
+      <div class="drow"><dt>Herkunft</dt><dd>${esc(x.country || "?")}${k.nonEu ? ` <small>Nicht-EU: ${Math.round(k.vat * 100)} % EUSt auf Gebot + Versand${k.duty ? `, ${Math.round(k.duty * 1000) / 10} % Zoll` : ""}, ${eur(k.fee, 2)} Einfuhrgebühr</small>` : ""}</dd></div>
       <div class="drow mine"><dt>Gesamt bei Höchstgebot</dt><dd id="clanded">${eur(k.landed, 2)}</dd></div>
       <div class="drow"><dt>Verkäufer</dt><dd>${esc(x.seller || "")}</dd></div>
       <div class="drow"><dt>Artikelnummer</dt><dd><code>${esc(x.item_id)}</code></dd></div>
