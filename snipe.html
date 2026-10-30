@@ -462,7 +462,8 @@ const until = d => {
 const FORMAT = { auction: "Auktion", best_offer: "Preisvorschlag", fixed_price: "Sofort-Kaufen", buy_it_now: "Sofort-Kaufen" };
 const ICON_MORE = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
-const state = { cards: [], sales: [], cands: [], runs: [], tab: "cards", feedCard: "", setupMissing: false };
+const state = { cards: [], sales: [], cands: [], runs: [], tab: "cards", feedCard: "", origin: "", setupMissing: false };
+try { state.origin = localStorage.getItem("ss_origin") || ""; } catch (e) { /* ohne Speicher */ }
 try { state.tab = localStorage.getItem("ss_tab") === "sales" ? "sales" : "cards"; } catch (e) { /* ohne Speicher */ }
 
 /* ---------- Anmeldung (wie im Tracker) ---------- */
@@ -675,6 +676,36 @@ function originText(s) {
   return parts.join(" · ");
 }
 
+/* ---------- Herkunftsfilter (nur Anzeige; Fairwert und Höchstgebot rechnen immer mit allen Verkäufen) ---------- */
+const EU_CODES = new Set(["AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT",
+  "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"]);
+const ORIGIN_NAME = c => c === "DE" ? "Deutschland" : COUNTRY[c] || c;
+function originOk(sale, f) {
+  if (!f) return true;
+  const c = sale.country || null;
+  if (f === "EU") return Boolean(c) && EU_CODES.has(c);
+  if (f === "NONEU") return Boolean(c) && !EU_CODES.has(c);
+  if (f === "UNK") return !c;
+  return c === f;
+}
+// Auswahl mit Anzahl je Option; Länder nach Häufigkeit
+function originSelectHtml(sales, id) {
+  const cnt = new Map();
+  for (const x of sales) cnt.set(x.country || "", (cnt.get(x.country || "") || 0) + 1);
+  const n = f => sales.filter(x => originOk(x, f)).length;
+  const opts = [["", `Alle Länder (${sales.length})`], ["DE", `Deutschland (${n("DE")})`], ["EU", `EU (${n("EU")})`],
+    ["NONEU", `Außerhalb der EU (${n("NONEU")})`]];
+  const countries = [...cnt.entries()].filter(([c]) => c && c !== "DE").sort((a, b) => b[1] - a[1]);
+  for (const [c, k] of countries) opts.push([c, `${ORIGIN_NAME(c)} (${k})`]);
+  if (cnt.get("")) opts.push(["UNK", `Herkunft unbekannt (${cnt.get("")})`]);
+  const cur = opts.some(([v]) => v === state.origin) ? state.origin : "";
+  return `<select id="${id}" aria-label="Herkunft der Verkäufe">${opts.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+}
+function setOrigin(v) {
+  state.origin = v;
+  try { localStorage.setItem("ss_origin", v); } catch (e) { /* egal */ }
+}
+
 function saleLi(s, withCard) {
   const fmt = FORMAT[s.format] || (s.format ? s.format : "");
   const small = ebayImg(s.image, 225), big = ebayImg(s.image, 1600), link = ebayItemUrl(s.item_id, s.url);
@@ -688,15 +719,18 @@ function saleLi(s, withCard) {
 }
 
 function feedHtml(active) {
-  const list = state.sales.filter(s => s.used && (!state.feedCard || s.card_id === state.feedCard));
+  const base = state.sales.filter(s => s.used && (!state.feedCard || s.card_id === state.feedCard));
+  const list = base.filter(s => originOk(s, state.origin));
   return `<div class="toolbar">
       <select id="feedcard" aria-label="Karte">
         <option value="">Alle Karten</option>
         ${active.map(c => `<option value="${esc(c.id)}"${c.id === state.feedCard ? " selected" : ""}>${esc(c.name)}</option>`).join("")}
       </select>
+      ${originSelectHtml(base, "feedorigin")}
       <span class="muted" style="font-size:14px">${list.length} Verkäufe · neueste zuerst</span>
     </div>
-    ${list.length ? `<ul class="feed">${list.slice(0, 300).map(s => saleLi(s, !state.feedCard)).join("")}</ul>` : `<p class="empty">Noch keine Verkäufe gespeichert.</p>`}`;
+    ${list.length ? `<ul class="feed">${list.slice(0, 300).map(s => saleLi(s, !state.feedCard)).join("")}</ul>`
+      : `<p class="empty">${base.length ? "Keine Verkäufe mit dieser Herkunft." : "Noch keine Verkäufe gespeichert."}</p>`}`;
 }
 
 function wire() {
@@ -714,6 +748,8 @@ function wire() {
   });
   const fc = $("#feedcard");
   if (fc) fc.onchange = () => { state.feedCard = fc.value; render(); };
+  const fo = $("#feedorigin");
+  if (fo) fo.onchange = () => { setOrigin(fo.value); render(); };
   $("#wrap").addEventListener("click", e => {
     const c = e.target.closest("[data-card]");
     if (c) return openCard(c.dataset.card);
@@ -875,23 +911,35 @@ function openCard(id) {
       : `<p class="dnote">Diese Karte steht in der watchlist.yaml und lässt sich nur dort ändern.</p>`}
     <section class="dsec">
       <h3>Verkäufe</h3>
-      ${all.length ? `<div class="chart" id="chart"></div>
-        <div class="legend" aria-hidden="true"><span><i></i>Verkauf</span><span id="lgoff" hidden><i class="off"></i>Ausreißer</span>
-          <span><i class="line"></i>Fairwert</span><span><i class="line bid"></i>Höchstgebot</span></div>` : `<p class="muted">Noch keine Verkäufe gespeichert.</p>`}
-      ${all.length ? `<div class="toolbar" style="margin-top:14px"><span class="muted" style="font-size:14px">${used.length} Verkäufe${all.length > used.length ? `, ${all.length - used.length} Ausreißer` : ""}</span>
+      ${all.length ? `<div class="toolbar">${originSelectHtml(all, "corigin")}<span class="muted" style="font-size:14px" id="scount"></span>
         ${all.length > used.length ? `<label class="toggle"><input type="checkbox" id="showoff" style="width:auto;display:inline;margin:0"> Ausreißer zeigen</label>` : ""}</div>
-        <ul class="sales" id="slist">${used.map(s => saleLi(s, false)).join("")}</ul>` : ""}
+        <p class="muted dsmall" id="fnote" hidden>Gefiltert: Diagramm und Liste zeigen nur diese Verkäufe. Fairwert und Höchstgebot sind aus allen Verkäufen berechnet.</p>
+        <div class="chart" id="chart"></div>
+        <div class="legend" aria-hidden="true"><span><i></i>Verkauf</span><span id="lgoff" hidden><i class="off"></i>Ausreißer</span>
+          <span><i class="line"></i>Fairwert</span><span><i class="line bid"></i>Höchstgebot</span></div>
+        <ul class="sales" id="slist" style="margin-top:14px"></ul>` : `<p class="muted">Noch keine Verkäufe gespeichert.</p>`}
     </section>`);
   wireCardActions(sheet, c);
   // Ausreißer sind standardmäßig ausgeblendet, damit sie die Preisachse nicht strecken
-  if (all.length) drawChart($("#chart", sheet), used.length ? used : all, c);
-  const so = $("#showoff", sheet);
-  if (so) so.onchange = () => {
-    const list = so.checked ? all : used;
-    $("#slist", sheet).innerHTML = list.map(s => saleLi(s, false)).join("");
-    $("#lgoff", sheet).hidden = !so.checked;
-    drawChart($("#chart", sheet), list, c);
+  const so = $("#showoff", sheet), co = $("#corigin", sheet);
+  const show = () => {
+    if (!all.length) return;
+    const withOff = so && so.checked;
+    const pool = withOff ? all : (used.length ? used : all);
+    const f = co ? co.value : "";
+    const list = pool.filter(x => originOk(x, f));
+    const offN = withOff ? list.filter(x => !x.used).length : 0;
+    $("#scount", sheet).textContent = `${list.length - offN} Verkäufe${offN ? `, ${offN} Ausreißer` : ""}`;
+    $("#fnote", sheet).hidden = !f;
+    $("#slist", sheet).innerHTML = list.map(x => saleLi(x, false)).join("");
+    $("#lgoff", sheet).hidden = !withOff;
+    const host = $("#chart", sheet);
+    if (list.length) drawChart(host, list, c);
+    else host.innerHTML = `<p class="muted" style="padding:40px 0;text-align:center">Keine Verkäufe mit dieser Herkunft.</p>`;
   };
+  show();
+  if (so) so.onchange = show;
+  if (co) co.onchange = () => { setOrigin(co.value); state.dirty = true; show(); };
 }
 
 function wireCardActions(sheet, c) {
