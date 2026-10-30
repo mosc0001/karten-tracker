@@ -1008,89 +1008,287 @@ function criteriaWarnings(c) {
   return out;
 }
 
+// Japanische Sets: englische Bezeichnung und ob Kartennummern aufgedruckt sind (aus dem Karten-Tracker)
+const JP_SETS = {
+  PMCG1: { en: "Base Set (Expansion Pack)", noNumber: true }, PMCG2: { en: "Jungle", noNumber: true },
+  PMCG3: { en: "Fossil (Mystery of the Fossils)", noNumber: true }, PMCG4: { en: "Team Rocket (Rocket Gang)", noNumber: true },
+  PMCG5: { en: "Gym Heroes (Leaders' Stadium)", noNumber: true }, PMCG6: { en: "Gym Challenge (Challenge from the Darkness)", noNumber: true },
+  neo1: { en: "Neo Genesis (Gold, Silver, to a New World)", noNumber: true }, neo2: { en: "Neo Discovery (Crossing the Ruins)", noNumber: true },
+  neo3: { en: "Neo Revelation (Awakening Legends)", noNumber: true }, neo4: { en: "Neo Destiny (Darkness, and to Light)", noNumber: true },
+  E1: { en: "Base Expansion Pack (e-Series 1)" }, E2: { en: "The Town on No Map (e-Series 2)" }, E3: { en: "Wind from the Sea (e-Series 3)" },
+  E4: { en: "Split Earth (e-Series 4)" }, E5: { en: "Mysterious Mountains (e-Series 5)" }, VS1: { en: "Pokémon VS" }, web1: { en: "Pokémon Web" },
+  SM12a: { en: "Tag All Stars (SM12a)" }, S4a: { en: "Shiny Star V (S4a)" }, S8b: { en: "VMAX Climax (S8b)" }, S12a: { en: "VSTAR Universe (S12a)" },
+  SV2a: { en: "Pokémon Card 151 (SV2a)" }, SV4a: { en: "Shiny Treasure ex (SV4a)" }, SV8a: { en: "Terastal Festival ex (SV8a)" },
+};
+const jpSetLabel = (sid, jaName) => (JP_SETS[sid] && JP_SETS[sid].en) || (jaName ? `${jaName} (${sid})` : sid || "");
+const jpNoNumber = sid => Boolean(JP_SETS[sid] && JP_SETS[sid].noNumber);
+const numKey = x => String(x ?? "").trim().toUpperCase().replace(/^([A-Z]*)0*(\d)/, "$1$2");
+const LANG_API = { en: "en", de: "de", jp: "ja" };
+
 function openAdd() {
-  const s = { lang: "en", results: [], picked: null };
+  const s = { lang: "en", results: [], picked: null, enHint: null };
   const sheet = openSheet(`
     <header class="sheet-head"><h2>Karte hinzufügen</h2><button class="ghost" data-close>Fertig</button></header>
     <p class="muted dsmall" style="margin:0 0 6px">Sprache des Slabs, nach der der Scout suchen soll.</p>
-    <div class="seg" id="langseg"><button data-l="en" class="on">Englisch</button><button data-l="de">Deutsch</button></div>
+    <div class="seg" id="langseg"><button data-l="en" class="on">Englisch</button><button data-l="de">Deutsch</button><button data-l="jp">Japanisch</button></div>
     <div class="searchrow">
-      <input id="q" type="search" placeholder="Name oder Nummer, z. B. Lapras oder 202/165" enterkeyhint="search" autocomplete="off">
+      <input id="q" type="search" placeholder="Name, Set oder Nummer, z. B. Lapras, Crown Zenith oder GG05/GG70" enterkeyhint="search" autocomplete="off">
       <button id="sbtn" class="primary">Suchen</button>
     </div>
+    <p class="muted dsmall" id="jphint" hidden>Japanisch: Suche mit dem deutschen oder englischen Namen (z. B. Glurak oder Charizard), mit dem japanischen Namen oder bei neueren Karten mit der Nummer (z. B. 006/165). Alte Karten bis Neo haben keine Nummer, dort hilft das Set in der Trefferliste.</p>
     <div id="res"></div>`);
   const res = $("#res", sheet);
-
+  const lang = () => LANG_API[s.lang];
+  const isJP = () => s.lang === "jp";
+  const setLang = l => {
+    s.lang = l;
+    sheet.querySelectorAll("#langseg button").forEach(x => x.classList.toggle("on", x.dataset.l === l));
+    $("#jphint", sheet).hidden = l !== "jp";
+  };
   sheet.querySelectorAll("#langseg button").forEach(b => b.onclick = () => {
-    s.lang = b.dataset.l;
-    sheet.querySelectorAll("#langseg button").forEach(x => x.classList.toggle("on", x === b));
+    setLang(b.dataset.l);
     res.innerHTML = ""; s.results = []; s.picked = null;
   });
 
-  function showResults(list, msg) {
+  // setHits: passende Sets zur Eingabe, oberhalb der Karten; ein Tipp zeigt alle Karten des Sets
+  function showResults(list, msg, setHits = []) {
     s.results = list;
-    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${msg}</p>` : ""}${list.length ? `<ul class="results">${list.map(c => `<li><button class="pick" data-id="${esc(c.id)}">
+    const setsHtml = setHits.length ? `<div class="sethits"><h4>Sets</h4><ul class="results">${setHits.map(x => `<li><button class="pick setpick" data-set="${esc(x.id)}">
+        <span class="seticon" aria-hidden="true">${x.symbol ? `<img src="${esc(x.symbol)}.png" alt="" loading="lazy" onerror="this.remove()">` : ""}</span>
+        <span><b>${esc(x.label)}</b><small>${x.count ? `${x.count} Karten` : "Set"} · alle Karten anzeigen</small></span><span class="chevr" aria-hidden="true">›</span></button></li>`).join("")}</ul></div>` : "";
+    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${msg}</p>` : ""}${setsHtml}${list.length ? `${setHits.length ? `<h4 class="reshead">Karten</h4>` : ""}<ul class="results">${list.map(c => {
+      const sid = setIdFromCardId(c.id, c.localId);
+      const setLbl = isJP() ? jpSetLabel(sid, c.setName) : (c.setName || sid);
+      const nr = isJP() && jpNoNumber(sid) ? "" : `, Nr. ${esc(c.localId)}`;
+      return `<li><button class="pick" data-id="${esc(c.id)}">
         ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'noimg'}))">` : `<span class="noimg"></span>`}
-        <span><b>${esc(c.name)}</b><small>${esc(c.setName || setIdFromCardId(c.id, c.localId))}, Nr. ${esc(c.localId)}</small></span></button></li>`).join("")}</ul>` : ""}`;
-    res.querySelectorAll(".pick").forEach(b => b.onclick = () => pick(b.dataset.id));
+        <span><b>${esc(c.name)}</b><small>${esc(setLbl)}${nr}</small></span></button></li>`;
+    }).join("")}</ul>` : ""}`;
+    res.querySelectorAll(".pick:not(.setpick)").forEach(b => b.onclick = () => pick(b.dataset.id));
+    res.querySelectorAll(".setpick").forEach(b => b.onclick = () => openSet(b.dataset.set, setHits.find(x => x.id === b.dataset.set)));
+  }
+
+  // Sets, deren Name zur Eingabe passt (bei Deutsch auch über den englischen Setnamen, z. B. "Crown Zenith")
+  function matchSets(sets, alias, q) {
+    const nq = norm(q).trim();
+    if (nq.length < 3) return [];
+    const aliasName = new Map((alias || []).map(x => [x.id, x.name]));
+    const words = nq.split(/\s+/);
+    const hit = x => {
+      const label = isJP() ? jpSetLabel(x.id, x.name) : x.name;
+      const hay = norm(`${label} ${aliasName.get(x.id) || ""} ${x.name} ${x.id}`);
+      return words.every(w => hay.includes(w));
+    };
+    return sets.filter(hit).reverse().slice(0, 12).map(x => ({
+      id: x.id, label: isJP() ? jpSetLabel(x.id, x.name) : x.name, symbol: x.symbol || null,
+      count: x.cardCount && (x.cardCount.total || x.cardCount.official) || null,
+    }));
+  }
+
+  // "Lapras Crown Zenith" oder "Crown Zenith Lapras": Eingabe in Kartenname und Set aufteilen, alle Aufteilungen
+  // durchprobieren (längster Name zuerst) und nur Karten aus den passenden Sets zeigen
+  async function nameInSet(q, sets, alias) {
+    const w = q.trim().split(/\s+/);
+    if (w.length < 2) return null;
+    const splits = [];
+    for (let k = w.length - 1; k >= 1; k--) {
+      splits.push([w.slice(0, k).join(" "), w.slice(k).join(" ")]);
+      splits.push([w.slice(w.length - k).join(" "), w.slice(0, w.length - k).join(" ")]);
+    }
+    for (const [namePart, setPart] of splits) {
+      const sh = matchSets(sets, alias, setPart);
+      if (!sh.length || namePart.length < 2) continue;
+      const ids = new Set(sh.map(x => x.id));
+      const cards = await tcg(`${lang()}/cards?name=${encodeURIComponent(namePart)}&pagination:page=1&pagination:itemsPerPage=250`).catch(() => []);
+      const inSet = cards.filter(c => ids.has(setIdFromCardId(c.id, c.localId)));
+      if (inSet.length) return { list: inSet, namePart, sets: sh };
+    }
+    return null;
+  }
+  // Alle Karten eines Sets, nach Nummer sortiert (Buchstaben-Nummern wie GG05 hinten)
+  async function openSet(id, info) {
+    res.innerHTML = `<p class="muted">Set wird geladen …</p>`;
+    try {
+      const d = await tcg(`${lang()}/sets/${encodeURIComponent(id)}`);
+      const cards = (d && d.cards) || [];
+      if (!cards.length) { res.innerHTML = `<p class="muted">Zu diesem Set liefert TCGdex keine Kartenliste.</p>`; return; }
+      const key = x => { const m = String(x.localId).match(/^([A-Za-z]*)(\d+)(.*)$/); return m ? [m[1] ? 1 : 0, m[1], Number(m[2]), m[3]] : [2, String(x.localId), 0, ""]; };
+      cards.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1].localeCompare(y[1]) || x[2] - y[2] || x[3].localeCompare(y[3]); });
+      const label = (info && info.label) || (isJP() ? jpSetLabel(id, d.name) : d.name);
+      showResults(cards.map(c => ({ ...c, setName: d.name })), `${esc(label)}: ${cards.length} Karten. Tippe die gewünschte an.`);
+      res.scrollIntoView({ block: "start", behavior: "smooth" });
+    } catch (e) {
+      res.innerHTML = `<p class="err">Set konnte nicht geladen werden: ${esc(e.message)}</p>`;
+    }
   }
 
   async function search() {
     const raw = $("#q", sheet).value.trim();
-    const num = raw.match(/(\d+)\s*\/\s*(\d+)/);
-    if (num) return searchByNumber(num[1], Number(num[2]), raw.replace(num[0], "").trim());
+    s.enHint = null;
+    // "6/105", aber auch Nummern mit Buchstaben wie "GG05/GG70" (Galarian Gallery), "TG12/TG30", "RC5/RC32"
+    const num = raw.match(/\b([A-Za-z]{0,4}\d{1,3})\s*\/\s*[A-Za-z]{0,4}(\d{1,3})\b/);
+    if (num) return searchByNumber(num[1].toUpperCase(), Number(num[2]), raw.replace(num[0], "").trim());
+    // "Lapras GG05": Name plus Nummer ohne Setgröße, Treffer nach der Nummer filtern
+    const loose = raw.match(/^(.*\S)\s+#?([A-Za-z]{0,4}\d{1,3})$/);
+    const nameQ = loose && /[A-Za-zÄÖÜäöüß]{2}/.test(loose[1]) ? loose[1] : raw;
+    const numQ = loose && nameQ !== raw ? loose[2] : null;
     if (raw.length < 2) return;
     res.innerHTML = `<p class="muted">Suche läuft …</p>`;
+    if (isJP()) return searchJapanese(raw);
     try {
-      const [list, sets] = await Promise.all([
-        tcg(`${s.lang}/cards?name=${encodeURIComponent(raw)}&pagination:page=1&pagination:itemsPerPage=40`),
-        setsFor(s.lang).catch(() => [])
+      let [list, sets, enSets] = await Promise.all([
+        tcg(`${lang()}/cards?name=${encodeURIComponent(nameQ)}&pagination:page=1&pagination:itemsPerPage=250`).catch(() => []),
+        setsFor(lang()).catch(() => []),
+        lang() === "en" ? Promise.resolve(null) : setsFor("en").catch(() => [])
       ]);
-      if (!list.length) { res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, die Nummer (z. B. 202/165) oder die andere Sprache.</p>`; return; }
+      if (numQ) {
+        const hit = list.filter(c => numKey(c.localId) === numKey(numQ));
+        if (hit.length) list = hit;
+      }
+      let setHits = numQ ? [] : matchSets(sets, enSets, raw);
+      if (!list.length) {
+        const combo = await nameInSet(nameQ, sets, enSets);
+        if (combo) {
+          list = combo.list; setHits = [];
+          if (numQ) { const hit = list.filter(c => numKey(c.localId) === numKey(numQ)); if (hit.length) list = hit; }
+        }
+      }
+      if (!list.length && setHits.length === 1) return openSet(setHits[0].id, setHits[0]);
+      if (!list.length && !setHits.length) {
+        res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, den Setnamen, die Kartennummer (z. B. 202/165) oder die andere Sprache.</p>`;
+        return;
+      }
       const byId = new Map(sets.map(x => [x.id, x.name]));
-      showResults(list.map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })));
-    } catch (e) { res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`; }
+      // neueste Sets zuerst (Reihenfolge der TCGdex-Setliste), Sondersets wie Galarian Gallery beim Hauptset
+      const order = new Map(sets.map((x, i) => [x.id, i]));
+      list.sort((a, b) => (order.get(setIdFromCardId(b.id, b.localId)) ?? -1) - (order.get(setIdFromCardId(a.id, a.localId)) ?? -1));
+      showResults(list.slice(0, 120).map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })),
+        list.length > 120 ? esc(`${list.length} Karten gefunden, die neuesten 120. Mit Nummer geht es schneller, z. B. „${nameQ} GG05“ oder „GG05/GG70“.`) : "", setHits);
+    } catch (e) {
+      res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
+    }
   }
 
-  // "202/165": Karte Nr. 202 aus Sets mit 165 offiziellen Karten
+  // Japanische Karten über den deutschen oder englischen Namen finden: Pokédex-Nummer der Treffer ermitteln, dann
+  // alle japanischen Karten dieses Pokémon laden. Japanisch geschriebene Namen sucht TCGdex direkt.
+  async function searchJapanese(raw) {
+    try {
+      const q = encodeURIComponent(raw);
+      const page = "pagination:page=1&pagination:itemsPerPage=12";
+      const [en, de, ja, sets] = await Promise.all([
+        tcg(`en/cards?name=${q}&${page}`).catch(() => []),
+        tcg(`de/cards?name=${q}&${page}`).catch(() => []),
+        tcg(`ja/cards?name=${q}&pagination:page=1&pagination:itemsPerPage=60`).catch(() => []),
+        setsFor("ja").catch(() => [])
+      ]);
+      const dex = new Set();
+      for (const [l, list] of [["en", en], ["de", de]]) {
+        const first = list[0];
+        if (!first) continue;
+        const d = await tcg(`${l}/cards/${encodeURIComponent(first.id)}`).catch(() => null);
+        (d && Array.isArray(d.dexId) ? d.dexId : []).forEach(x => dex.add(x));
+        if (l === "en" && first.name && !s.enHint) s.enHint = first.name;
+      }
+      if (!s.enHint && de[0]) {
+        const e2 = await tcg(`en/cards/${encodeURIComponent(de[0].id)}`).catch(() => null);
+        if (e2 && e2.name) s.enHint = e2.name;
+      }
+      const byDex = await Promise.all([...dex].slice(0, 3).map(n => tcg(`ja/dex-ids/${n}`).then(r => (r && r.cards) || []).catch(() => [])));
+      const seen = new Set(), list = [];
+      for (const c of [...ja, ...byDex.flat()]) if (c && c.id && !seen.has(c.id)) { seen.add(c.id); list.push(c); }
+      const setHits = matchSets(sets, null, raw);
+      if (!list.length && setHits.length === 1) return openSet(setHits[0].id, setHits[0]);
+      if (!list.length && setHits.length) return showResults([], "", setHits);
+      if (!list.length) {
+        res.innerHTML = `<p class="muted">Keine japanische Karte gefunden. Probiere den englischen Namen, die Nummer (z. B. 006/165) oder den Namen in Katakana.</p>`;
+        return;
+      }
+      const order = new Map(sets.map((x, i) => [x.id, i]));
+      const setName = new Map(sets.map(x => [x.id, x.name]));
+      list.sort((a, b) => (order.get(setIdFromCardId(a.id, a.localId)) ?? 1e6) - (order.get(setIdFromCardId(b.id, b.localId)) ?? 1e6));
+      showResults(list.slice(0, 80).map(c => ({ ...c, setName: setName.get(setIdFromCardId(c.id, c.localId)) })),
+        list.length > 80 ? `${list.length} Karten gefunden, die ersten 80 nach Erscheinen. Grenze mit einem genaueren Namen oder der Nummer ein.` : "", setHits);
+    } catch (e) {
+      res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
+    }
+  }
+
+  // Alle Karten mit dieser Nummer in Sets mit dieser offiziellen Kartenzahl (null = kein solches Set)
+  async function findByNumber(localNum, official) {
+    const sets = await setsFor(lang());
+    const cands = sets.filter(x => x.cardCount && Number(x.cardCount.official) === official).slice(0, 12);
+    if (!cands.length) return null;
+    const variants = [...new Set([localNum, localNum.replace(/^0+(?=\d)/, ""), localNum.padStart(3, "0")])];
+    const found = [];
+    for (const set of cands) {
+      for (const v of variants) {
+        try {
+          const card = await tcg(`${lang()}/cards/${encodeURIComponent(`${set.id}-${v}`)}`);
+          if (card && card.id) { found.push({ id: card.id, name: card.name, image: card.image, localId: card.localId, setName: set.name }); break; }
+        } catch (e) { /* diese Schreibweise gibt es nicht, nächste probieren */ }
+      }
+    }
+    return found;
+  }
+
+  // "6/105": Karte Nr. 6 aus einem Set mit 105 offiziellen Karten
   async function searchByNumber(localNum, official, nameFilter) {
     res.innerHTML = `<p class="muted">Suche nach Nr. ${esc(localNum)}/${official} …</p>`;
     try {
-      const sets = await setsFor(s.lang);
-      const cands = sets.filter(x => x.cardCount && Number(x.cardCount.official) === official).slice(0, 12);
-      if (!cands.length) { res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache.</p>`; return; }
-      const variants = [...new Set([localNum, localNum.replace(/^0+(?=\d)/, ""), localNum.padStart(3, "0")])];
-      const found = [];
-      for (const set of cands) {
-        for (const v of variants) {
-          try {
-            const card = await tcg(`${s.lang}/cards/${encodeURIComponent(`${set.id}-${v}`)}`);
-            if (card && card.id) { found.push({ id: card.id, name: card.name, image: card.image, localId: card.localId, setName: set.name }); break; }
-          } catch (e) { /* Schreibweise gibt es nicht */ }
-        }
-      }
+      const found = await findByNumber(localNum, official);
       const nf = norm(nameFilter);
-      const list = nf ? found.filter(c => norm(c.name).includes(nf)) : found;
-      if (!list.length) { res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden.</p>`; return; }
+      const list = found ? (nf ? found.filter(c => norm(c.name).includes(nf)) : found) : [];
+      if (!list.length && nameFilter && !isJP()) {
+        // z. B. Tippfehler bei der Setgröße oder GG05/GG70 (Gallery-Sets zählen anders): über Name und Nummer weitersuchen
+        $("#q", sheet).value = `${nameFilter} ${localNum}`;
+        return search();
+      }
+      if (!found) {
+        res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache, oder suche mit Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`;
+        return;
+      }
+      if (!list.length) {
+        res.innerHTML = `<p class="muted">Keine Karte Nr. ${esc(localNum)}/${official} gefunden. Versuche Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`;
+        return;
+      }
       showResults(list);
-    } catch (e) { res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`; }
+    } catch (e) {
+      res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
+    }
   }
 
   async function pick(id) {
     res.innerHTML = `<p class="muted">Karte wird geladen …</p>`;
     try {
-      const c = await tcg(`${s.lang}/cards/${encodeURIComponent(id)}`);
-      // Name in der anderen Sprache als Alternative (z. B. venusaur|bisaflor), Titel sind oft gemischt
-      const other = await tcg(`${s.lang === "en" ? "de" : "en"}/cards/${encodeURIComponent(id)}`).catch(() => null);
+      const c = await tcg(`${lang()}/cards/${encodeURIComponent(id)}`);
+      // Namen in Englisch und Deutsch als Alternativen (z. B. venusaur|bisaflor), Titel sind oft gemischt.
+      // Japanische Karten werden auf eBay mit englischem Namen angeboten: über die Pokédex-Nummer nachschlagen.
+      let enName = s.lang === "en" ? c.name : null, deName = s.lang === "de" ? c.name : null;
+      if (s.lang === "jp") {
+        const dex = Array.isArray(c.dexId) ? c.dexId[0] : null;
+        const first = async l => dex ? (await tcg(`${l}/dex-ids/${dex}`).then(r => (r && r.cards && r.cards[0]) || null).catch(() => null)) : null;
+        const [e1, d1] = await Promise.all([first("en"), first("de")]);
+        enName = (e1 && e1.name) || s.enHint || null;
+        deName = d1 && d1.name || null;
+      } else {
+        const other = await tcg(`${s.lang === "en" ? "de" : "en"}/cards/${encodeURIComponent(id)}`).catch(() => null);
+        if (other) { if (s.lang === "en") deName = other.name; else enName = other.name; }
+      }
+      const other = { name: s.lang === "en" ? deName : enName };
       s.picked = c;
+      s.baseName = s.lang === "jp" ? (enName || c.name) : c.name;
       // Offizielle Setgröße nur bei reinen Zahlen (GG05, TG12 usw. haben eigene Zählungen)
       const official = /^\d+$/.test(String(c.localId)) ? (c.set && c.set.cardCount && c.set.cardCount.official) : null;
       const nums = numberTerms(c.localId, official);
-      const k1 = keyName(c.name), k2 = other ? keyName(other.name) : "";
+      const baseName = s.baseName;   // JP: englischer Name, so steht er in eBay-Titeln
+      const k1 = keyName(baseName), k2 = other.name ? keyName(other.name) : "";
       const nameTerm = [...new Set([k1, k2].filter(Boolean))].join("|");
-      const setName = (c.set && c.set.name) || "";
-      const display = `${c.name} ${official ? nums.search : c.localId}${setName ? ` (${setName})` : ""} ${s.lang.toUpperCase()}`;
-      const searchTerm = `${c.name} ${nums.search} PSA 10`;
+      const sid = (c.set && c.set.id) || setIdFromCardId(c.id, c.localId);
+      const setName = s.lang === "jp" ? jpSetLabel(sid, c.set && c.set.name) : ((c.set && c.set.name) || "");
+      const noNum = s.lang === "jp" && jpNoNumber(sid);   // alte japanische Karten ohne aufgedruckte Nummer
+      const numText = noNum ? "" : (official ? nums.search : c.localId);
+      const display = `${baseName}${numText ? " " + numText : ""}${setName ? ` (${setName})` : ""} ${s.lang.toUpperCase()}`;
+      const searchTerm = `${baseName}${numText ? " " + numText : ""}${s.lang === "jp" ? " Japanese" : ""} PSA 10`;
       const warns = criteriaWarnings(c);
       const imgUrl = c.image ? `${c.image}/low.webp` : null;
       const exists = state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang);
@@ -1100,7 +1298,8 @@ function openAdd() {
           ${imgUrl ? `<img src="${esc(imgUrl)}" alt="">` : ""}
           <div>
             <h3>${esc(c.name)}</h3>
-            <p class="muted">${esc(setName)}, Nr. ${esc(c.localId)}${official ? "/" + esc(official) : ""}</p>
+            ${s.lang === "jp" && enName && enName !== c.name ? `<p class="muted">${esc(enName)}</p>` : ""}
+            <p class="muted">${esc(setName)}${noNum ? "" : `, Nr. ${esc(c.localId)}${official ? "/" + esc(official) : ""}`}</p>
             <p class="muted">${esc(c.rarity || "")}</p>
           </div>
         </div>
@@ -1110,7 +1309,7 @@ function openAdd() {
           <label>Name in der Übersicht<input id="fname" value="${esc(display)}"></label>
           <label>eBay-Suchbegriff<input id="fsearch" value="${esc(searchTerm)}">
             <small class="hint">Damit sucht der Scout laufende Auktionen und verkaufte Exemplare.</small></label>
-          <label>Muss im Titel stehen<input id="fmust" value="${esc([nameTerm, nums.must].filter(Boolean).join(", "))}">
+          <label>Muss im Titel stehen<input id="fmust" value="${esc([nameTerm, noNum ? "" : nums.must].filter(Boolean).join(", "))}">
             <small class="hint">Mit Komma getrennt, alle Begriffe müssen vorkommen. „a|b“ heißt a oder b. PSA 10 prüft der Scout immer selbst.</small></label>
           <label>Ausschließen (optional)<input id="fexcl" placeholder="z. B. japanese, 1st edition">
             <small class="hint">Andere Gradings, Sammelangebote und Proxys sind schon ausgeschlossen.</small></label>
@@ -1139,7 +1338,7 @@ function openAdd() {
     if (!(disc >= 0 && disc <= 60)) { err.textContent = "Abschlag bitte zwischen 0 und 60 %."; return; }
     btn.disabled = true; err.textContent = "";
     const row = {
-      id: slug(`${keyName(c.name)} ${c.localId} ${c.set ? c.set.id : ""} ${s.lang}`),
+      id: slug(`${keyName(s.baseName || c.name)} ${c.localId} ${c.set ? c.set.id : ""} ${s.lang}`),
       name, search, must_include: must, must_exclude: excl.length ? excl : null, language: s.lang,
       discount: disc / 100, max_total_eur: cap > 0 ? cap : null, active: true, origin: "app",
       tcgdex_id: c.id, set_name: setName || null, card_number: official ? `${c.localId}/${official}` : String(c.localId),
