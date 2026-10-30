@@ -692,6 +692,59 @@ function offerRatio(detail) {
   return r;
 }
 
+/* ---------- Herkunft und Einfuhrumsatzsteuer ---------- */
+// Preise sollen zeigen, was ein Käufer in Deutschland gezahlt hätte. Bei Verkäufen außerhalb der EU steckt die
+// Einfuhrumsatzsteuer (19 %) teils schon im eBay-Preis, teils kommt sie beim Bezahlen dazu. Regel (geprüft an
+// 300 Detailseiten, Okt. 2026, und einem Kaufbeleg mit eBay International Shipping):
+//   1. Detailseite vorhanden: includedVATInPrices entscheidet (false = aufschlagen).
+//   2. Ohne Detailseite, außerhalb der EU: Auktion aufschlagen; UK-Sofortkauf aufschlagen (stimmt in ca. 70 %);
+//      Sofortkauf oder Preisvorschlag aus den USA und anderen Ländern nicht (eBay rechnet die Steuer ein).
+//   3. EU oder Herkunft unbekannt: nie.
+const IMPORT_VAT = 0.19;
+const EU_COUNTRIES = new Set(["AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT",
+  "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"]);
+const COUNTRY_NAMES = [
+  ["vereinigte staaten", "US"], ["united states", "US"], ["usa", "US"], ["vereinigtes konigreich", "GB"],
+  ["united kingdom", "GB"], ["grossbritannien", "GB"], ["great britain", "GB"], ["england", "GB"], ["uk", "GB"],
+  ["japan", "JP"], ["kanada", "CA"], ["canada", "CA"], ["australien", "AU"], ["australia", "AU"], ["hongkong", "HK"],
+  ["hong kong", "HK"], ["china", "CN"], ["taiwan", "TW"], ["sudkorea", "KR"], ["south korea", "KR"], ["korea", "KR"],
+  ["singapur", "SG"], ["singapore", "SG"], ["schweiz", "CH"], ["switzerland", "CH"], ["norwegen", "NO"], ["norway", "NO"],
+  ["neuseeland", "NZ"], ["new zealand", "NZ"], ["thailand", "TH"], ["philippinen", "PH"], ["philippines", "PH"],
+  ["malaysia", "MY"], ["indonesien", "ID"], ["indonesia", "ID"], ["mexiko", "MX"], ["mexico", "MX"], ["turkei", "TR"],
+  ["turkey", "TR"], ["ukraine", "UA"], ["deutschland", "DE"], ["germany", "DE"], ["osterreich", "AT"], ["austria", "AT"],
+  ["frankreich", "FR"], ["france", "FR"], ["italien", "IT"], ["italy", "IT"], ["spanien", "ES"], ["spain", "ES"],
+  ["niederlande", "NL"], ["netherlands", "NL"], ["belgien", "BE"], ["belgium", "BE"], ["polen", "PL"], ["poland", "PL"],
+  ["portugal", "PT"], ["irland", "IE"], ["ireland", "IE"], ["danemark", "DK"], ["denmark", "DK"], ["schweden", "SE"],
+  ["sweden", "SE"], ["finnland", "FI"], ["finland", "FI"], ["tschechien", "CZ"], ["czech", "CZ"], ["ungarn", "HU"],
+  ["hungary", "HU"], ["griechenland", "GR"], ["greece", "GR"], ["luxemburg", "LU"], ["luxembourg", "LU"],
+  ["slowakei", "SK"], ["slovakia", "SK"], ["slowenien", "SI"], ["slovenia", "SI"], ["kroatien", "HR"], ["croatia", "HR"],
+  ["rumanien", "RO"], ["romania", "RO"], ["bulgarien", "BG"], ["bulgaria", "BG"], ["litauen", "LT"], ["lithuania", "LT"],
+  ["lettland", "LV"], ["latvia", "LV"], ["estland", "EE"], ["estonia", "EE"], ["malta", "MT"], ["zypern", "CY"], ["cyprus", "CY"],
+];
+// "from United Kingdom", "Stroud, United Kingdom", "aus Vereinigte Staaten" -> Ländercode; null = nicht erkennbar
+function countryFromText(v) {
+  if (typeof v !== "string" || !v.trim()) return null;
+  if (/^[A-Za-z]{2}$/.test(v.trim())) return v.trim().toUpperCase() === "UK" ? "GB" : v.trim().toUpperCase();
+  const t = norm(v);
+  for (const [name, code] of COUNTRY_NAMES) {
+    if (new RegExp(`(^|[^a-z])${name}([^a-z]|$)`).test(t)) return code; // Namen bestehen nur aus Buchstaben und Leerzeichen
+  }
+  return null;
+}
+// Steckt die (deutsche) Steuer schon im Preis? Nur von der Detailseite bekannt; null = keine Angabe
+function vatIncludedIn(detail) {
+  const iv = detail && detail.vls && detail.vls.listing && detail.vls.listing.itemVariations;
+  if (!Array.isArray(iv)) return null;
+  const v = iv.map((x) => x && x.priceSettings && x.priceSettings.includedVATInPrices).filter((x) => typeof x === "boolean");
+  return v.length ? v.some(Boolean) : null;
+}
+function addImportVat(country, format, bestOffer, vatIncluded) {
+  if (!country || EU_COUNTRIES.has(country)) return false;
+  if (vatIncluded === true || vatIncluded === false) return !vatIncluded;
+  if (format === "auction") return true;
+  return country === "GB" && !bestOffer;
+}
+
 /* ========================================================================
    parseSale: aus einer Suchzeile (und, falls vorhanden, der Artikelseite) die Merkmale lesen
    ======================================================================== */
@@ -791,6 +844,13 @@ function parseSale(row, detail = null) {
     if (r != null && r >= 0.2 && r < 0.995) offerPrice = Math.round(askPrice * r * 100) / 100;
   }
   const price = offerPrice ?? askPrice;
+  // Herkunft: Detailseite ("Stroud, United Kingdom"), sonst Suchzeile ("from United Kingdom"). Ohne Ortsangabe
+  // ist es bei frischen Suchzeilen ein deutsches Angebot; bei gespeicherten Zeilen gilt die gespeicherte Herkunft.
+  const locText = (detail && typeof detail.itemLocation === "string" && detail.itemLocation) ||
+    (typeof row.itemLocation === "string" && row.itemLocation) || "";
+  let country = countryFromText(locText);
+  if (!country && !locText) country = row.countryKnown !== undefined ? row.countryKnown : "DE";
+  const vatIncluded = detail ? vatIncludedIn(detail) : (row.vatIncludedKnown ?? null);
   return {
     itemId: String(row.itemId),
     url: row.itemId ? `https://www.ebay.de/itm/${row.itemId}` : row.url || null,
@@ -812,6 +872,7 @@ function parseSale(row, detail = null) {
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
     stage, stageSource, language, edition, variant, reprint, finish, pattern, conflicts,
     image: pickImage(row, detail),
+    country, location: locText || null, vatIncluded,
   };
 }
 
@@ -1220,13 +1281,23 @@ function saleFromDb(r) {
   }
   let price = Number(r.price_eur);
   if (facts.offerPrice != null) { facts.askingPrice = price; price = Number(facts.offerPrice); facts.priceUncertain = false; }
+  // Einfuhrumsatzsteuer nur, wo sie nicht schon im eBay-Preis steckt (Regel bei addImportVat)
+  const bestOffer = facts.format !== "auction" && Boolean((raw && (raw.bestOfferAccepted || raw.priceIsAskingPrice)) || facts.offerChecked);
+  facts.importVat = addImportVat(facts.country, facts.format, bestOffer, facts.vatIncluded);
+  if (facts.importVat) {
+    facts.ebayPrice = price;
+    price = Math.round(price * (1 + IMPORT_VAT) * 100) / 100;
+    if (facts.askingPrice != null) facts.askingPrice = Math.round(facts.askingPrice * (1 + IMPORT_VAT) * 100) / 100;
+  }
   return { ...facts, itemId: r.item_id, title: r.title, url: r.url, price, soldAt: new Date(r.sold_at).toISOString(), currency: "EUR" };
 }
 
 // Suchzeile einer gespeicherten Zeile rekonstruieren (für nachträgliche Detailseiten)
 function rowFromDb(r) {
   const raw = (r.parsed && r.parsed.raw) || {};
-  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted, image: (r.parsed && r.parsed.image) || null };
+  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted, image: (r.parsed && r.parsed.image) || null,
+    itemLocation: (r.parsed && r.parsed.location) || undefined, countryKnown: r.parsed && "country" in r.parsed ? r.parsed.country : null,
+    vatIncludedKnown: r.parsed && typeof r.parsed.vatIncluded === "boolean" ? r.parsed.vatIncluded : null };
 }
 
 // Vorauswahl: lohnt sich eine Detailseite (kostet Geld)?  "drop" = nicht zur Karte, "ok" = reicht, "detail" = Detailseite holen
@@ -3110,6 +3181,9 @@ function saleImgHtml(src) {
   return `<a class="simg" href="${esc(big)}" target="_blank" rel="noopener" title="Angebotsfoto groß öffnen"><img src="${esc(small)}" alt="Angebotsfoto" loading="lazy" onerror="this.parentNode.style.visibility='hidden'"></a>`;
 }
 
+const COUNTRY_LABEL = { US: "USA", GB: "UK", JP: "Japan", CA: "Kanada", AU: "Australien", HK: "Hongkong", CN: "China",
+  TW: "Taiwan", KR: "Korea", SG: "Singapur", CH: "Schweiz", AT: "Österreich", FR: "Frankreich", IT: "Italien", ES: "Spanien",
+  NL: "Niederlande", BE: "Belgien", PL: "Polen" };
 function saleTags(s, editable) {
   const t = [s.language || "Sprache offen", s.graded ? (s.gradeKey || (s.gradeUncertain ? "Grade unklar" : "Grade offen")) : (s.stage || "Zustand offen")];
   if (s.graded) editable = false;
@@ -3117,6 +3191,9 @@ function saleTags(s, editable) {
   if (s.pattern) t.push(PATTERN_LABEL[s.pattern]);
   else if (f) t.push(FIN_LABEL[f] + (s.finishEff && s.finishEff !== s.finish ? " (laut Nummer)" : ""));
   if (s.edition === "1st") t.push("1st Ed.");
+  // Herkunft (nur außerhalb Deutschlands) und ob die Einfuhrumsatzsteuer aufgeschlagen wurde
+  if (s.country && s.country !== "DE") t.push(COUNTRY_LABEL[s.country] || s.country);
+  if (s.importVat) t.push("+19 % EUSt");
   const html = t.map(x => `<span class="tag">${esc(x)}</span>`);
   if (editable && s._id != null) html[1] = stageSelectHtml(s);
   return html.join("");
