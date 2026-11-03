@@ -412,6 +412,9 @@ details.rgrp>p{margin:2px 0 4px}
 .addform small.hint{display:block;margin-top:4px;color:var(--muted);font-size:12px}
 .critwarn{margin:12px 0 0;padding:10px 12px;border-radius:12px;background:var(--fill);font-size:14px}
 .critwarn b{color:var(--ink)}
+.pick .jxnote{display:block;color:var(--accent);font-size:13px;margin-top:1px}
+.ghostpick img,.ghostpick .noimg{opacity:.55}
+.morehead{margin-top:22px}
 .cardact{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .danger{color:#d70015}
 .shipedit{display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap}
@@ -990,12 +993,14 @@ function keyName(name) {
   const words = norm(name).split(" ").filter(w => w && !NAME_SKIP.has(w) && !/^\d+$/.test(w));
   return words[0] || norm(name).split(" ")[0] || "";
 }
-// Nummer, wie sie in eBay-Titeln steht: 202/165 (auch 006/102), sonst die Kennung (GG05, TG12, SWSH050)
-function numberTerms(localId, official) {
+// Nummer, wie sie in eBay-Titeln steht: 202/165 (auch 006/102), japanisch dreistellig (095/069), sonst die Kennung
+// (GG05, TG12, SWSH050)
+function numberTerms(localId, official, jp = false) {
   const L = String(localId || "").trim();
   if (/^\d+$/.test(L) && official) {
-    const n = parseInt(L, 10), a = `${n}/${official}`, b = `${String(n).padStart(3, "0")}/${official}`;
-    return { search: a, must: a === b ? a : `${a}|${b}` };
+    const n = parseInt(L, 10), p3 = String(n).padStart(3, "0"), t3 = String(official).padStart(3, "0");
+    const a = `${n}/${official}`, c = `${p3}/${t3}`;
+    return { search: jp ? c : a, must: [...new Set([a, `${p3}/${official}`, c])].join("|") };
   }
   return { search: L, must: L.toLowerCase() };
 }
@@ -1020,13 +1025,349 @@ const JP_SETS = {
   SM12a: { en: "Tag All Stars (SM12a)" }, S4a: { en: "Shiny Star V (S4a)" }, S8b: { en: "VMAX Climax (S8b)" }, S12a: { en: "VSTAR Universe (S12a)" },
   SV2a: { en: "Pokémon Card 151 (SV2a)" }, SV4a: { en: "Shiny Treasure ex (SV4a)" }, SV8a: { en: "Terastal Festival ex (SV8a)" },
 };
-const jpSetLabel = (sid, jaName) => (JP_SETS[sid] && JP_SETS[sid].en) || (jaName ? `${jaName} (${sid})` : sid || "");
+const jpSetLabel = (sid, jaName) => (JP_SETS[sid] && JP_SETS[sid].en) || JP_SET_EN[sid] || (jaName ? `${jaName} (${sid})` : sid || "");
 const jpNoNumber = sid => Boolean(JP_SETS[sid] && JP_SETS[sid].noNumber);
 const numKey = x => String(x ?? "").trim().toUpperCase().replace(/^([A-Z]*)0*(\d)/, "$1$2");
 const LANG_API = { en: "en", de: "de", jp: "ja" };
 
+/* ---- Japanische Karten mit englischen Angaben finden ----
+   TCGdex verknüpft japanische und englische Drucke nicht. Die Brücke: Pokédex-Nummer (welches Pokémon), Namenszusatz
+   (ex, V, VMAX …), Set-Entsprechung (Evolving Skies ↔ Eevee Heroes …) und Zeichner + Seltenheit (gleiche Illustration). */
+
+// Englische Namen japanischer Sets (Anzeige, Suche nach Setnamen)
+const JP_SET_EN = {
+  ADV1: "ADV Expansion Pack (ADV1)", ADV2: "Miracle of the Desert (ADV2)", ADV3: "Rulers of the Heavens (ADV3)",
+  ADV4: "Magma vs Aqua: Two Ambitions (ADV4)", ADV5: "Undone Seal (ADV5)", PCG1: "Flight of Legends (PCG1)",
+  PCG2: "Clash of the Blue Sky (PCG2)", PCG3: "Rocket Gang Strikes Back (PCG3)",
+  XY1a: "Collection X (XY1a)", XY1b: "Collection Y (XY1b)", XY2: "Wild Blaze (XY2)", XY3: "Rising Fist (XY3)",
+  XY4: "Phantom Gate (XY4)", XY5a: "Gaia Volcano (XY5a)", XY5b: "Tidal Storm (XY5b)", XY6: "Emerald Break (XY6)",
+  XY7: "Bandit Ring (XY7)", XY8a: "Blue Shock (XY8a)", XY8b: "Red Flash (XY8b)", XY9: "Rage of the Broken Heavens (XY9)",
+  XY10: "Awakening Psychic King (XY10)", XY11a: "Explosive Fighter (XY11a)", XY11b: "Cruel Traitor (XY11b)",
+  CP1: "Double Crisis (CP1)", CP2: "Legendary Shine Collection (CP2)", CP6: "20th Anniversary (CP6)",
+  SM1S: "Collection Sun (SM1S)", SM1M: "Collection Moon (SM1M)", SM1p: "Sun & Moon (SM1+)", "SM1+": "Sun & Moon (SM1+)",
+  SM2K: "Islands Await You (SM2K)", SM2L: "Alolan Moonlight (SM2L)", SM2p: "Beyond a New Challenge (SM2+)", "sm2+": "Beyond a New Challenge (SM2+)",
+  SM3H: "To Have Seen the Battle Rainbow (SM3H)", SM3N: "Darkness that Consumes Light (SM3N)", SM3p: "Shining Legends (SM3+)", "SM3+": "Shining Legends (SM3+)",
+  SM4S: "Awakened Heroes (SM4S)", SM4A: "Ultradimensional Beasts (SM4A)", SM4p: "GX Battle Boost (SM4+)", "SM4+": "GX Battle Boost (SM4+)",
+  SM5S: "Ultra Sun (SM5S)", SM5M: "Ultra Moon (SM5M)", SM5p: "Ultra Force (SM5+)", "SM5+": "Ultra Force (SM5+)",
+  SM6: "Forbidden Light (SM6)", SM6a: "Dragon Storm (SM6a)", SM6b: "Champion Road (SM6b)", SM7: "Sky-Splitting Charisma (SM7)",
+  SM7a: "Thunderclap Spark (SM7a)", SM7b: "Fairy Rise (SM7b)", SM8: "Super-Burst Impact (SM8)", SM8a: "Dark Order (SM8a)",
+  SM8b: "GX Ultra Shiny (SM8b)", SM9: "Tag Bolt (SM9)", SM9a: "Night Unison (SM9a)", SM9b: "Full Metal Wall (SM9b)",
+  SM10: "Double Blaze (SM10)", SM10a: "GG End (SM10a)", SM10b: "Sky Legend (SM10b)", SM11: "Miracle Twin (SM11)",
+  SM11a: "Remix Bout (SM11a)", SM11b: "Dream League (SM11b)", SM12: "Alter Genesis (SM12)",
+  S1W: "Sword (S1W)", S1H: "Shield (S1H)", S1a: "VMAX Rising (S1a)", S2: "Rebellion Crash (S2)", S2a: "Explosive Walker (S2a)",
+  S3: "Infinity Zone (S3)", S3a: "Legendary Heartbeat (S3a)", S4: "Amazing Volt Tackle (S4)", S5I: "Single Strike Master (S5I)",
+  S5R: "Rapid Strike Master (S5R)", S5a: "Matchless Fighters (S5a)", S6H: "Silver Lance (S6H)", S6K: "Jet-Black Spirit (S6K)",
+  S6a: "Eevee Heroes (S6a)", S7R: "Blue Sky Stream (S7R)", S7D: "Skyscraping Perfection (S7D)", S8: "Fusion Arts (S8)",
+  S8a: "25th Anniversary Collection (S8a)", S9: "Star Birth (S9)", S9a: "Battle Region (S9a)", S10P: "Space Juggler (S10P)",
+  S10D: "Time Gazer (S10D)", S10a: "Dark Phantasma (S10a)", S10b: "Pokémon GO (S10b)", S11: "Lost Abyss (S11)",
+  S11a: "Incandescent Arcana (S11a)", S12: "Paradigm Trigger (S12)",
+  SV1S: "Scarlet ex (SV1S)", SV1V: "Violet ex (SV1V)", SV1a: "Triplet Beat (SV1a)", SV2P: "Snow Hazard (SV2P)", SV2D: "Clay Burst (SV2D)",
+  SV3: "Ruler of the Black Flame (SV3)", SV3a: "Raging Surf (SV3a)", SV4K: "Ancient Roar (SV4K)", SV4M: "Future Flash (SV4M)",
+  SV5K: "Wild Force (SV5K)", SV5M: "Cyber Judge (SV5M)", SV5a: "Crimson Haze (SV5a)", SV6: "Mask of Change (SV6)",
+  SV6a: "Night Wanderer (SV6a)", SV7: "Stellar Miracle (SV7)", SV7a: "Paradise Dragona (SV7a)", SV8: "Super Electric Breaker (SV8)",
+  SV9: "Battle Partners (SV9)", SV9a: "Heat Wave Arena (SV9a)", SV10: "Glory of Team Rocket (SV10)", SV11B: "Black Bolt (SV11B)",
+  SV11W: "White Flare (SV11W)", M1L: "Mega Brave (M1L)", M1S: "Mega Symphonia (M1S)", M2: "Inferno X (M2)", M2a: "MEGA Dream ex (M2a)",
+  M6a: "30th Celebration (M6a)",
+};
+// Offizielle Kartenzahl japanischer Sets, die TCGdex nicht oder nur ohne japanische Texte führt
+const JP_SET_COUNT = { S4: 100, S4a: 190, S5a: 70, S6a: 69, S7R: 67, S8a: 28, S10D: 67, S10b: 71, XY1a: 60, XY1b: 60, XY2: 80,
+  XY3: 96, XY4: 88, XY5a: 70, XY5b: 70, XY6: 78, XY7: 81, XY8a: 59, XY8b: 59, XY9: 80, XY10: 78, XY11a: 54, XY11b: 54, CP6: 87 };
+// Englisches Set (TCGdex-Kennung) → japanische Sets, aus denen seine Karten stammen
+const EN_TO_JP = {
+  base1: ["PMCG1"], base2: ["PMCG2"], base3: ["PMCG3"], base4: ["PMCG1", "PMCG2"], base5: ["PMCG4"], gym1: ["PMCG5"], gym2: ["PMCG6"],
+  lc: ["PMCG1", "PMCG2", "PMCG3", "PMCG4"], neo1: ["neo1"], neo2: ["neo2"], neo3: ["neo3"], neo4: ["neo4"],
+  ecard1: ["E1"], ecard2: ["E2", "E3"], ecard3: ["E4", "E5"], ex1: ["ADV1"], ex2: ["ADV2"], ex3: ["ADV3"], ex4: ["ADV4"],
+  ex5: ["ADV5"], ex6: ["PCG1"], ex7: ["PCG3"], ex8: ["PCG2"],
+  xy1: ["XY1a", "XY1b"], xy2: ["XY2"], xy3: ["XY3"], xy4: ["XY4"], xy5: ["XY5a", "XY5b"], xy6: ["XY6"], xy7: ["XY7"],
+  xy8: ["XY8a", "XY8b"], xy9: ["XY9"], xy10: ["XY10"], xy11: ["XY11a", "XY11b"], xy12: ["CP6"], dc1: ["CP1"], g1: ["CP2"],
+  sm1: ["SM1S", "SM1M", "SM1p"], sm2: ["SM2K", "SM2L", "SM2p"], sm3: ["SM3H", "SM3N"], "sm3.5": ["SM3p"],
+  sm4: ["SM4S", "SM4A"], sm5: ["SM5S", "SM5M", "SM5p"], sm6: ["SM6", "SM5p"], sm7: ["SM7", "SM6b", "SM7a"],
+  "sm7.5": ["SM6a"], sm8: ["SM8", "SM7a", "SM7b", "SM8a"], sm9: ["SM9", "SM9a", "SM8a"], sm10: ["SM10", "SM9b", "SM10a", "SM10b"],
+  sm11: ["SM11", "SM10a", "SM10b", "SM11a"], sm115: ["SM8b"], sma: ["SM8b"], sm12: ["SM12", "SM11a", "SM11b", "SM12a"],
+  swsh1: ["S1W", "S1H", "S1a"], swsh2: ["S2", "S1a"], swsh3: ["S3", "S2a"], "swsh3.5": ["S3a", "S4", "S2a", "S3"],
+  swsh4: ["S4", "S3a"], "swsh4.5": ["S4a"], "swsh4.5sv": ["S4a"], swsh5: ["S5I", "S5R"], swsh6: ["S6H", "S6K", "S5a"],
+  swsh7: ["S7R", "S7D", "S6a"], cel25: ["S8a"], cel25cc: ["S8a"], swsh8: ["S8", "S7R", "S7D"], swsh9: ["S9", "S8b"],
+  swsh9tg: ["S9", "S8b"], swsh10: ["S10P", "S10D", "S9a"], swsh10tg: ["S10P", "S10D", "S9a"], "swsh10.5": ["S10b"],
+  swsh11: ["S11", "S10a"], swsh11tg: ["S11", "S10a"], swsh12: ["S11a", "S12"], swsh12tg: ["S11a", "S12"],
+  "swsh12.5": ["S12a"], "swsh12.5gg": ["S12a"],
+  sv01: ["SV1S", "SV1V"], sv02: ["SV2P", "SV2D", "SV1a"], sv03: ["SV3", "SV2P", "SV2D"], "sv03.5": ["SV2a"],
+  sv04: ["SV4K", "SV4M", "SV3a"], "sv04.5": ["SV4a"], sv05: ["SV5K", "SV5M"], sv06: ["SV6", "SV5a"], "sv06.5": ["SV6a"],
+  sv07: ["SV7", "SV6a"], sv08: ["SV8", "SV7a"], "sv08.5": ["SV8a"], sv09: ["SV9"], sv10: ["SV10", "SV9a"],
+  "sv10.5b": ["SV11B"], "sv10.5w": ["SV11W"], me01: ["M1L", "M1S"], me02: ["M2"], "me02.5": ["M2a"], me03: ["M3"],
+  me04: ["M4"], me05: ["M5"], "30th": ["M6a"],
+};
+// Englische Vorsätze → japanische Schreibweise im Kartennamen
+const JX_PREFIX = [["team rocket's ", "ロケット団の"], ["rocket's ", "ロケット団の"], ["dark ", "わるい"], ["shining ", "ひかる"],
+  ["light ", "やさしい"], ["radiant ", "かがやく"], ["hisuian ", "ヒスイ"], ["galarian ", "ガラル"], ["alolan ", "アローラ"],
+  ["paldean ", "パルデア"], ["mega ", "メガ"], ["m ", "M"], ["brock's ", "タケシの"], ["misty's ", "カスミの"],
+  ["lt. surge's ", "マチスの"], ["erika's ", "エリカの"], ["sabrina's ", "ナツメの"], ["koga's ", "キョウの"],
+  ["blaine's ", "カツラの"], ["giovanni's ", "サカキの"], ["n's ", "Nの"], ["iono's ", "ナンジャモの"], ["lillie's ", "リーリエの"],
+  ["cynthia's ", "シロナの"], ["arven's ", "ペパーの"], ["ethan's ", "ヒビキの"], ["hop's ", "ホップの"], ["marnie's ", "マリィの"],
+  ["steven's ", "ダイゴの"], ["larry's ", "アオキの"]];
+// Wörter, die allein kein Setname sind ("Umbreon VMAX" ist kein Umbreon aus "VMAX Climax")
+const JX_FORM_WORDS = new Set(["v", "vmax", "vstar", "v-union", "gx", "ex", "break", "lv", "x", "mega", "m", "dark", "light",
+  "shining", "radiant", "galarian", "alolan", "hisuian", "paldean", "japanese", "japan", "jp", "psa", "10"]);
+const JX_KANA = /[぀-ヿ㐀-鿿]/;
+const jxNorm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const jxNumKey = x => String(x ?? "").trim().toUpperCase().replace(/^([A-Z]*)0*(\d)/, "$1$2");
+
+// Namenszusatz und Vorsätze eines Kartennamens (englisch oder japanisch)
+function jxForm(name) {
+  const n = String(name || "").trim(), ja = JX_KANA.test(n);
+  const m = n.match(/(VMAX|VSTAR|V-UNION|GX|EX|ex|BREAK|LV\.X|V)$/);
+  let suffix = null;
+  if (m && m.index > 0 && (ja || !/[A-Za-z]/.test(n[m.index - 1]))) suffix = m[1];
+  const lower = ` ${n.toLowerCase()}`;
+  const hits = ja ? [] : JX_PREFIX.filter(([en]) => lower.includes(` ${en}`));
+  return { suffix, pre: [...new Set(hits.map(x => x[1]))], preEn: hits.map(x => x[0]),
+    owner: !ja && /[a-z.]'s\s/i.test(n) && !hits.some(x => x[1].endsWith("の")) };
+}
+// Passt ein Name zur gesuchten Form? strict: auch "kein Zusatz" muss übereinstimmen (bei konkreter Vorlage)
+function jxFormOk(f, name, strict) {
+  if (!f) return true;
+  const g = jxForm(name);
+  if (f.suffix ? g.suffix !== f.suffix : (strict && g.suffix)) return false;
+  if (!JX_KANA.test(name)) return f.preEn.every(p => g.preEn.includes(p));
+  const ja = String(name).replace(/\s+/g, "");
+  if (!f.pre.every(p => p.length === 1 ? ja.startsWith(p) : ja.includes(p))) return false;
+  if (f.owner && !ja.includes("の")) return false;
+  if (strict && !f.pre.length && !f.owner && JX_PREFIX.some(([, p]) => p.length > 1 && ja.includes(p))) return false;
+  return true;
+}
+// Sets, deren Name (englisch, deutsch oder englischer Name des japanischen Sets) zur Eingabe passt
+function jxSetMatch(text, sets) {
+  const nq = jxNorm(text), words = nq.split(" ").filter(Boolean);
+  if (nq.length < 3 || !words.length || words.every(w => JX_FORM_WORDS.has(w))) return null;
+  const hit = h => { const hay = ` ${jxNorm(h)} `; return words.every(w => hay.includes(` ${w}`)); };
+  const en = new Set();
+  for (const x of sets.en) if (hit(`${x.name} ${x.id}`)) en.add(x.id);
+  for (const x of sets.de) if (hit(x.name)) en.add(x.id);
+  const ja = sets.ja.filter(x => hit(`${jpSetLabel(x.id, x.name)} ${x.id}`)).map(x => x.id);
+  for (const [id, label] of Object.entries(JP_SET_EN)) if (!ja.includes(id) && hit(`${label} ${id}`)) ja.push(id);
+  return en.size || ja.length ? { en: [...en], ja } : null;
+}
+// Karte Nr. x aus allen Sets mit y offiziellen Karten (vollständige Kartendaten)
+async function jxByNumber(tcg, l, sets, localNum, official) {
+  const cands = sets.filter(x => x.cardCount && Number(x.cardCount.official) === official).slice(0, 12);
+  const variants = [...new Set([localNum, localNum.replace(/^0+(?=\d)/, ""), localNum.padStart(3, "0")])];
+  const found = await Promise.all(cands.map(async set => {
+    for (const v of variants) {
+      const c = await tcg(`${l}/cards/${encodeURIComponent(`${set.id}-${v}`)}`).catch(() => null);
+      if (c && c.id) return c;
+    }
+    return null;
+  }));
+  return found.filter(Boolean);
+}
+// Englischer Name einer japanischen Karte über die Pokédex-Nummer, mit Vorsatz und Zusatz (Dark …, … VMAX)
+async function jxEnglishName(tcg, jaCard, hint) {
+  const ja = String(jaCard.name || "").trim();
+  if (ja && !JX_KANA.test(ja)) return ja;
+  const dex = Array.isArray(jaCard.dexId) ? jaCard.dexId[0] : null;
+  if (!dex) return hint || null;
+  const r = await tcg(`en/dex-ids/${dex}`).catch(() => null);
+  // Grundname: ohne Vorsatz und Zusatz ("Dark Charizard", "Charizard ex" → Charizard)
+  const names = ((r && r.cards) || []).map(x => x.name).filter(n => n && !jxForm(n).preEn.length && !/'s\s/.test(n))
+    .map(n => { const sf = jxForm(n).suffix; return sf ? n.slice(0, -sf.length).replace(/[\s-]+$/, "") : n; }).filter(Boolean);
+  if (!names.length) return hint || null;
+  const count = new Map();
+  for (const n of names) count.set(n, (count.get(n) || 0) + 1);
+  const base = [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0];
+  const f = jxForm(ja), pre = JX_PREFIX.find(([, p]) => p.length === 1 ? ja.startsWith(p) : ja.includes(p));
+  const preEn = pre ? pre[0].replace(/(^|\s)\S/g, s => s.toUpperCase()) : "";
+  return `${preEn}${base}${f.suffix ? " " + f.suffix : ""}`;
+}
+
+/* Suche: liefert { primary, ghosts, others, setHits, msg, enNames, jaSets }
+   primary = wahrscheinlichste japanische Entsprechungen (oben), ghosts = Set-Entsprechungen, die TCGdex nicht führt,
+   others = übrige japanische Karten dieses Pokémon */
+async function jxSearch(raw, tcg, setsFor, sidOf) {
+  const page = n => `pagination:page=1&pagination:itemsPerPage=${n}`;
+  const byName = (l, n) => n && n.length >= 2 ? tcg(`${l}/cards?name=${encodeURIComponent(n)}&${page(250)}`).catch(() => []) : Promise.resolve([]);
+  const detail = async (id) => (await tcg(`en/cards/${encodeURIComponent(id)}`).catch(() => null)) || tcg(`de/cards/${encodeURIComponent(id)}`).catch(() => null);
+  const [jaSets, enSets, deSets] = await Promise.all(["ja", "en", "de"].map(l => setsFor(l).catch(() => [])));
+  const sets = { ja: jaSets, en: enSets, de: deSets };
+  const enSetName = new Map([...deSets, ...enSets].map(x => [x.id, x.name]));
+  const jaLabel = id => jpSetLabel(id, (jaSets.find(x => x.id === id) || {}).name);
+  const loose = t => { const m = t.match(/^(.*[A-Za-zÄÖÜäöüß぀-ヿ].*?)\s+#?([A-Za-z]{0,4}\d{1,3})$/); return m ? [m[1], m[2]] : null; };
+
+  let q = String(raw || "").replace(/\s+/g, " ").trim(), num = null, numQ = null;
+  const nm = q.match(/\b([A-Za-z]{0,4}\d{1,3})\s*\/\s*[A-Za-z]{0,4}(\d{1,3})\b/);
+  if (nm) { num = { local: nm[1].toUpperCase(), official: Number(nm[2]) }; q = q.replace(nm[0], " ").replace(/\s+/g, " ").trim(); }
+  const kana = JX_KANA.test(q);
+  const whole = num ? null : jxSetMatch(q, sets);
+  let name = q, setM = null, enCards = [], deCards = [];
+  if (q && !kana) {
+    [enCards, deCards] = await Promise.all([byName("en", q), byName("de", q)]);
+    if (!enCards.length && !deCards.length && !num) {
+      // "Charizard ex 151", "Umbreon VMAX Evolving Skies", "Eevee Heroes Umbreon": Name und Set trennen
+      const w = q.split(" "), splits = [];
+      for (let k = w.length - 1; k >= 1; k--) {
+        splits.push([w.slice(0, k).join(" "), w.slice(k).join(" ")]);
+        splits.push([w.slice(w.length - k).join(" "), w.slice(0, w.length - k).join(" ")]);
+      }
+      let tries = 0;
+      for (const [n0, sp] of splits) {
+        const sm = jxSetMatch(sp, sets);
+        if (!sm) continue;
+        const lm = loose(n0), n = lm ? lm[0] : n0;
+        if (!/[A-Za-zÄÖÜäöüß]{2}/.test(n) || ++tries > 5) continue;
+        const [e1, d1] = await Promise.all([byName("en", n), byName("de", n)]);
+        if (!e1.length && !d1.length) continue;
+        name = n; setM = sm; enCards = e1; deCards = d1; numQ = lm ? lm[1] : null;
+        break;
+      }
+      if (!setM) {
+        const lm = loose(q);
+        if (lm) { name = lm[0]; numQ = lm[1]; [enCards, deCards] = await Promise.all([byName("en", name), byName("de", name)]); }
+      }
+    }
+  } else if (q && kana) {
+    const lm = loose(q);
+    if (lm) { name = lm[0]; numQ = lm[1]; }
+  }
+
+  // Englische Vorlagen (deutsche Karten haben dieselben TCGdex-Kennungen)
+  const refMap = new Map();
+  for (const c of [...enCards, ...deCards]) if (!refMap.has(c.id)) refMap.set(c.id, c);
+  const refs = [...refMap.values()];
+  const fQ = name && !kana ? jxForm(name) : null;
+  let spec = null;   // konkrete englische Karten (Nummer oder Set angegeben)
+  if (num) {
+    spec = await jxByNumber(tcg, "en", enSets, num.local, num.official);
+    if (name && !kana) { const nn = jxNorm(name); spec = spec.filter(c => jxNorm(c.name).includes(nn) || refMap.has(c.id)); }
+  } else if (setM && setM.en.length) {
+    const ids = new Set(setM.en);
+    spec = refs.filter(c => ids.has(sidOf(c)));
+  } else if (numQ && refs.length) {
+    spec = refs.filter(c => jxNumKey(c.localId) === jxNumKey(numQ));
+  }
+  if (spec && numQ && !num) { const h = spec.filter(c => jxNumKey(c.localId) === jxNumKey(numQ)); if (h.length) spec = h; }
+  if (spec && fQ && (fQ.suffix || fQ.preEn.length)) { const h = spec.filter(c => jxFormOk(fQ, c.name)); if (h.length) spec = h; }
+  if (spec && !spec.length) spec = null;
+  if (spec) spec = (await Promise.all(spec.slice(0, 8).map(c => c.dexId || c.illustrator ? c : detail(c.id)))).filter(Boolean);
+  if (spec && !spec.length) spec = null;
+
+  // Pokédex-Nummern
+  const dex = new Set();
+  (spec || []).forEach(c => (c.dexId || []).forEach(d => dex.add(d)));
+  if (!dex.size && refs.length) {
+    const nn = jxNorm(name), rank = c => { const n = jxNorm(c.name); return n === nn ? 0 : n.startsWith(nn) ? 1 : 2; };
+    const best = [...refs].sort((a, b) => rank(a) - rank(b) || a.name.length - b.name.length).slice(0, 2);
+    (await Promise.all(best.map(c => detail(c.id)))).forEach(d => d && (d.dexId || []).forEach(x => dex.add(x)));
+  }
+
+  // Japanische Kandidaten: alle Karten dieser Pokémon, japanisch geschriebene Namen direkt, Nummer direkt
+  const lists = await Promise.all([
+    ...[...dex].slice(0, 3).map(n => tcg(`ja/dex-ids/${n}`).then(r => (r && r.cards) || []).catch(() => [])),
+    name ? byName("ja", name) : Promise.resolve([]),
+  ]);
+  const pool = new Map();
+  for (const c of lists.flat()) if (c && c.id && !pool.has(c.id)) pool.set(c.id, c);
+  let direct = num ? await jxByNumber(tcg, "ja", jaSets, num.local, num.official) : [];
+  if (direct.length && name && dex.size) direct = direct.filter(c => (c.dexId || []).some(d => dex.has(d)) || pool.has(c.id));
+  if (numQ && !num && !(spec && setM && setM.en.length)) direct = [...pool.values()].filter(c => jxNumKey(c.localId) === jxNumKey(numQ));
+  const directIds = new Set(direct.map(c => c.id));
+
+  const strictName = spec && new Set(spec.map(c => c.name)).size === 1 ? spec[0].name : null;
+  const f = strictName ? jxForm(strictName) : fQ;
+  let cands = [...pool.values()], formMiss = false;
+  if (f && (f.suffix || f.pre.length || f.owner || strictName)) {
+    const h = cands.filter(c => jxFormOk(f, c.name, Boolean(strictName)));
+    if (h.length) cands = h; else formMiss = cands.length > 0;
+  }
+
+  // Japanische Sets, in denen die Entsprechung liegen sollte
+  const target = new Set(setM ? setM.ja : []);
+  const enSrc = [...new Set(spec ? spec.map(c => (c.set && c.set.id) || sidOf(c)) : setM ? setM.en : [])];
+  const unmapped = [];
+  for (const id of enSrc) { const js = EN_TO_JP[id]; if (js) js.forEach(x => target.add(x)); else unmapped.push(id); }
+
+  let primary = [...direct];
+  for (const c of cands) if (target.has(sidOf(c)) && !directIds.has(c.id)) primary.push(c);
+  const inPrimary = new Set(primary.map(c => c.id));
+  const order = new Map(jaSets.map((x, i) => [x.id, i]));
+  const others = cands.filter(c => !inPrimary.has(c.id))
+    .sort((a, b) => (order.get(sidOf(b)) ?? -1) - (order.get(sidOf(a)) ?? -1));
+
+  // Gleiche Illustration: Zeichner und Seltenheit mit den englischen Vorlagen vergleichen
+  const enNames = new Map();
+  const low = t => String(t || "").trim().toLowerCase();
+  const det = !spec ? [] : await Promise.all(primary.slice(0, 24).map(c => c.illustrator || c.rarity ? c : tcg(`ja/cards/${encodeURIComponent(c.id)}`).catch(() => null)));
+  primary = primary.map((c, i) => {
+    const d = det[i] || c;
+    let best = null, bs = 0;
+    for (const r of spec || []) {
+      let sc = 0;
+      if (d.illustrator && low(d.illustrator) === low(r.illustrator)) sc += 4;
+      if (d.rarity && low(d.rarity) === low(r.rarity)) sc += 2;
+      if (sc > bs) { bs = sc; best = r; }
+    }
+    const out = { ...c, _score: bs + (directIds.has(c.id) ? 10 : 0) };
+    if (best && bs >= 4) {
+      const off = best.set && best.set.cardCount && best.set.cardCount.official;
+      out.note = `wie englisch ${best.name} ${best.localId}${off && /^\d+$/.test(best.localId) ? "/" + off : ""} (${(best.set && best.set.name) || enSetName.get(sidOf(best)) || ""}), gleiche Illustration`;
+      enNames.set(c.id, best.name);
+    } else if (directIds.has(c.id)) {
+      out.note = num ? `japanische Nr. ${num.local}/${num.official}` : `japanische Nr. ${c.localId}`;
+    }
+    return out;
+  }).sort((a, b) => b._score - a._score || (order.get(sidOf(b)) ?? -1) - (order.get(sidOf(a)) ?? -1) || String(a.localId).localeCompare(String(b.localId), "en", { numeric: true }));
+
+  // Englischer Name je Karte (für die eBay-Suche): Vorlage mit gleichem Zusatz, sonst später über die Pokédex-Nummer
+  const refNames = [...new Set([...(spec || []), ...refs].map(c => c.name).filter(n => n && !JX_KANA.test(n)))];
+  for (const c of [...primary, ...others]) {
+    if (enNames.has(c.id)) continue;
+    const g = jxForm(c.name);
+    const fit = refNames.filter(n => { const e = jxForm(n); return e.suffix === g.suffix && jxFormOk(e, c.name, true); });
+    if (fit.length) enNames.set(c.id, fit.sort((a, b) => a.length - b.length)[0]);
+  }
+
+  // Set-Entsprechungen ohne Kartendaten bei TCGdex: zum Anlegen mit englischen Angaben anbieten
+  const have = new Set(primary.map(c => sidOf(c)));
+  const missing = [...target].filter(id => !have.has(id));
+  const gapSets = (await Promise.all(missing.slice(0, 6).map(async id => {
+    const d = await tcg(`ja/sets/${encodeURIComponent(id)}`).catch(() => null);
+    if (d && Array.isArray(d.cards) && d.cards.length) return null;
+    return { id, label: jaLabel(id), official: (d && d.cardCount && d.cardCount.official) || JP_SET_COUNT[id] || null };
+  }))).filter(Boolean);
+  const refForGhost = spec && spec.length ? spec : [];
+  const ghostName = (refForGhost[0] && refForGhost[0].name) || (refs.find(c => jxNorm(c.name) === jxNorm(name)) || {}).name || name;
+  const ghostImg = refForGhost.find(c => c.image);
+  const ghosts = name && (dex.size || refs.length) ? gapSets.map(g => ({ ghost: true, name: ghostName, setId: g.id, setLabel: g.label,
+    official: g.official, image: ghostImg ? ghostImg.image : null, dexId: [...dex] })) : [];
+
+  // Sets oben in der Liste
+  const hitIds = [...new Set([...(whole ? whole.ja : []), ...(whole ? whole.en.flatMap(id => EN_TO_JP[id] || []) : []), ...(setM ? target : [])])];
+  const setHits = hitIds.slice(0, 12).map(id => {
+    const x = jaSets.find(s => s.id === id);
+    return { id, label: jaLabel(id), symbol: (x && x.symbol) || null, count: (x && x.cardCount && (x.cardCount.total || x.cardCount.official)) || JP_SET_COUNT[id] || null };
+  });
+
+  // Hinweistext
+  const parts = [];
+  const setNames = ids => ids.map(id => enSetName.get(id) || id).join(", ");
+  if (spec && spec.length === 1) {
+    const r = spec[0], off = r.set && r.set.cardCount && r.set.cardCount.official;
+    parts.push(`Englische Vorlage: ${r.name} ${r.localId}${off && /^\d+$/.test(r.localId) ? "/" + off : ""} (${(r.set && r.set.name) || enSetName.get(sidOf(r)) || ""}).`);
+  } else if (spec && spec.length) {
+    parts.push(`Englische Vorlage: ${[...new Set(spec.map(c => c.name))].join(", ")} aus ${setNames(enSrc)}.`);
+  }
+  if (target.size && (spec || setM)) {
+    const labels = [...target].map(jaLabel);
+    if (primary.length) parts.push(`Passende japanische Karten aus ${labels.join(", ")} stehen oben${primary.some(c => c.note && c.note.includes("Illustration")) ? ", mit Hinweis bei gleicher Illustration" : ""}.`);
+    else if (!gapSets.length) parts.push(`In ${labels.join(", ")} hat die Kartendatenbank keine passende Karte.`);
+    if (gapSets.length) parts.push(`Zu ${gapSets.map(g => g.label).join(", ")} hat die Kartendatenbank (TCGdex) keine japanischen Kartendaten${ghosts.length ? ", dort kannst du die Karte mit den englischen Angaben anlegen" : ""}.`);
+  } else if (unmapped.length && (spec || setM)) {
+    parts.push(`Für ${setNames(unmapped)} ist keine japanische Set-Entsprechung hinterlegt, gezeigt werden alle japanischen Karten.`);
+  }
+  if (formMiss) parts.push(`Keine japanische Karte mit „${f.suffix || f.preEn.join("").trim()}“ in der Datenbank, gezeigt werden alle Karten dieses Pokémon.`);
+  if (num && !spec && !direct.length) parts.push(`Keine Karte Nr. ${num.local}/${num.official}, weder englisch noch japanisch.`);
+  return { primary, ghosts, others, setHits, msg: parts.join(" "), enNames, jaSets, total: primary.length + others.length };
+}
+
 function openAdd() {
-  const s = { lang: "en", results: [], picked: null, enHint: null };
+  const s = { lang: "en", results: [], picked: null, enHint: null, enNames: new Map(), ghosts: [], view: [[]] };
   const sheet = openSheet(`
     <header class="sheet-head"><h2>Karte hinzufügen</h2><button class="ghost" data-close>Fertig</button></header>
     <p class="muted dsmall" style="margin:0 0 6px">Sprache des Slabs, nach der der Scout suchen soll.</p>
@@ -1035,7 +1376,7 @@ function openAdd() {
       <input id="q" type="search" placeholder="Name, Set oder Nummer, z. B. Lapras, Crown Zenith oder GG05/GG70" enterkeyhint="search" autocomplete="off">
       <button id="sbtn" class="primary">Suchen</button>
     </div>
-    <p class="muted dsmall" id="jphint" hidden>Japanisch: Suche mit dem deutschen oder englischen Namen (z. B. Glurak oder Charizard), mit dem japanischen Namen oder bei neueren Karten mit der Nummer (z. B. 006/165). Alte Karten bis Neo haben keine Nummer, dort hilft das Set in der Trefferliste.</p>
+    <p class="muted dsmall" id="jphint" hidden>Japanisch: Suche mit den englischen Angaben, z. B. „Charizard ex 151“, „Umbreon VMAX Evolving Skies“ oder der englischen Nummer „Charizard ex 199/165“. Die japanische Entsprechung steht oben, bei gleicher Illustration mit Hinweis. Deutsche Namen, japanische Nummern (201/165) und Namen in Katakana gehen auch. Alte Karten bis Neo haben keine Nummer.</p>
     <div id="res"></div>`);
   const res = $("#res", sheet);
   const lang = () => LANG_API[s.lang];
@@ -1051,20 +1392,28 @@ function openAdd() {
   });
 
   // setHits: passende Sets zur Eingabe, oberhalb der Karten; ein Tipp zeigt alle Karten des Sets
-  function showResults(list, msg, setHits = []) {
-    s.results = list;
+  // more: weitere Treffer unter eigener Überschrift (japanische Suche), Einträge mit ghost: Karte ohne TCGdex-Daten
+  function showResults(list, msg, setHits = [], more = null) {
+    s.results = list; s.view = [list, msg, setHits, more];
+    s.ghosts = list.filter(c => c.ghost);
     const setsHtml = setHits.length ? `<div class="sethits"><h4>Sets</h4><ul class="results">${setHits.map(x => `<li><button class="pick setpick" data-set="${esc(x.id)}">
         <span class="seticon" aria-hidden="true">${x.symbol ? `<img src="${esc(x.symbol)}.png" alt="" loading="lazy" onerror="this.remove()">` : ""}</span>
         <span><b>${esc(x.label)}</b><small>${x.count ? `${x.count} Karten` : "Set"} · alle Karten anzeigen</small></span><span class="chevr" aria-hidden="true">›</span></button></li>`).join("")}</ul></div>` : "";
-    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${msg}</p>` : ""}${setsHtml}${list.length ? `${setHits.length ? `<h4 class="reshead">Karten</h4>` : ""}<ul class="results">${list.map(c => {
+    const item = c => {
+      if (c.ghost) return `<li><button class="pick ghostpick" data-g="${s.ghosts.indexOf(c)}">
+        ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'noimg'}))">` : `<span class="noimg"></span>`}
+        <span><b>${esc(c.name)}</b><small>${esc(c.setLabel)} · nicht in der Kartendatenbank</small><span class="jxnote">Mit englischen Angaben anlegen, Nummer trägst du selbst ein</span></span></button></li>`;
       const sid = setIdFromCardId(c.id, c.localId);
       const setLbl = isJP() ? jpSetLabel(sid, c.setName) : (c.setName || sid);
       const nr = isJP() && jpNoNumber(sid) ? "" : `, Nr. ${esc(c.localId)}`;
       return `<li><button class="pick" data-id="${esc(c.id)}">
         ${c.image ? `<img src="${esc(c.image)}/low.webp" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'noimg'}))">` : `<span class="noimg"></span>`}
-        <span><b>${esc(c.name)}</b><small>${esc(setLbl)}${nr}</small></span></button></li>`;
-    }).join("")}</ul>` : ""}`;
-    res.querySelectorAll(".pick:not(.setpick)").forEach(b => b.onclick = () => pick(b.dataset.id));
+        <span><b>${esc(c.name)}</b><small>${esc(setLbl)}${nr}</small>${c.note ? `<span class="jxnote">${esc(c.note)}</span>` : ""}</span></button></li>`;
+    };
+    const moreHtml = more && more.list.length ? `<h4 class="reshead morehead">${esc(more.title)}</h4><ul class="results">${more.list.map(item).join("")}</ul>` : "";
+    res.innerHTML = `${msg ? `<p class="okmsg" role="status">${msg}</p>` : ""}${setsHtml}${list.length ? `${setHits.length ? `<h4 class="reshead">Karten</h4>` : ""}<ul class="results">${list.map(item).join("")}</ul>` : ""}${moreHtml}`;
+    res.querySelectorAll(".pick:not(.setpick):not(.ghostpick)").forEach(b => b.onclick = () => pick(b.dataset.id));
+    res.querySelectorAll(".ghostpick").forEach(b => b.onclick = () => pickGhost(s.ghosts[Number(b.dataset.g)]));
     res.querySelectorAll(".setpick").forEach(b => b.onclick = () => openSet(b.dataset.set, setHits.find(x => x.id === b.dataset.set)));
   }
 
@@ -1125,6 +1474,11 @@ function openAdd() {
   async function search() {
     const raw = $("#q", sheet).value.trim();
     s.enHint = null;
+    if (isJP()) {
+      if (raw.length < 2) return;
+      res.innerHTML = `<p class="muted">Suche läuft …</p>`;
+      return searchJapanese(raw);
+    }
     // "6/105", aber auch Nummern mit Buchstaben wie "GG05/GG70" (Galarian Gallery), "TG12/TG30", "RC5/RC32"
     const num = raw.match(/\b([A-Za-z]{0,4}\d{1,3})\s*\/\s*[A-Za-z]{0,4}(\d{1,3})\b/);
     if (num) return searchByNumber(num[1].toUpperCase(), Number(num[2]), raw.replace(num[0], "").trim());
@@ -1134,7 +1488,6 @@ function openAdd() {
     const numQ = loose && nameQ !== raw ? loose[2] : null;
     if (raw.length < 2) return;
     res.innerHTML = `<p class="muted">Suche läuft …</p>`;
-    if (isJP()) return searchJapanese(raw);
     try {
       let [list, sets, enSets] = await Promise.all([
         tcg(`${lang()}/cards?name=${encodeURIComponent(nameQ)}&pagination:page=1&pagination:itemsPerPage=250`).catch(() => []),
@@ -1169,48 +1522,34 @@ function openAdd() {
     }
   }
 
-  // Japanische Karten über den deutschen oder englischen Namen finden: Pokédex-Nummer der Treffer ermitteln, dann
-  // alle japanischen Karten dieses Pokémon laden. Japanisch geschriebene Namen sucht TCGdex direkt.
+  // Japanische Karten mit englischen (oder deutschen) Angaben finden: Name, Set, Nummer – siehe jxSearch
   async function searchJapanese(raw) {
     try {
-      const q = encodeURIComponent(raw);
-      const page = "pagination:page=1&pagination:itemsPerPage=12";
-      const [en, de, ja, sets] = await Promise.all([
-        tcg(`en/cards?name=${q}&${page}`).catch(() => []),
-        tcg(`de/cards?name=${q}&${page}`).catch(() => []),
-        tcg(`ja/cards?name=${q}&pagination:page=1&pagination:itemsPerPage=60`).catch(() => []),
-        setsFor("ja").catch(() => [])
-      ]);
-      const dex = new Set();
-      for (const [l, list] of [["en", en], ["de", de]]) {
-        const first = list[0];
-        if (!first) continue;
-        const d = await tcg(`${l}/cards/${encodeURIComponent(first.id)}`).catch(() => null);
-        (d && Array.isArray(d.dexId) ? d.dexId : []).forEach(x => dex.add(x));
-        if (l === "en" && first.name && !s.enHint) s.enHint = first.name;
-      }
-      if (!s.enHint && de[0]) {
-        const e2 = await tcg(`en/cards/${encodeURIComponent(de[0].id)}`).catch(() => null);
-        if (e2 && e2.name) s.enHint = e2.name;
-      }
-      const byDex = await Promise.all([...dex].slice(0, 3).map(n => tcg(`ja/dex-ids/${n}`).then(r => (r && r.cards) || []).catch(() => [])));
-      const seen = new Set(), list = [];
-      for (const c of [...ja, ...byDex.flat()]) if (c && c.id && !seen.has(c.id)) { seen.add(c.id); list.push(c); }
-      const setHits = matchSets(sets, null, raw);
-      if (!list.length && setHits.length === 1) return openSet(setHits[0].id, setHits[0]);
-      if (!list.length && setHits.length) return showResults([], "", setHits);
-      if (!list.length) {
-        res.innerHTML = `<p class="muted">Keine japanische Karte gefunden. Probiere den englischen Namen, die Nummer (z. B. 006/165) oder den Namen in Katakana.</p>`;
+      const r = await jxSearch(raw, tcg, setsFor, c => setIdFromCardId(c.id, c.localId));
+      s.enNames = r.enNames;
+      const setName = new Map(r.jaSets.map(x => [x.id, x.name]));
+      const withSet = c => ({ ...c, setName: setName.get(setIdFromCardId(c.id, c.localId)) });
+      const top = [...r.primary.map(withSet), ...r.ghosts];
+      if (!top.length && !r.others.length) {
+        if (r.setHits.length === 1) return openSet(r.setHits[0].id, r.setHits[0]);
+        if (r.setHits.length) return showResults([], esc(r.msg), r.setHits);
+        res.innerHTML = `<p class="muted">${r.msg ? esc(r.msg) + " " : ""}Keine japanische Karte gefunden. Probiere den englischen Namen mit Set (z. B. „Charizard ex 151“), die englische Nummer (z. B. „Charizard ex 199/165“) oder den Namen in Katakana.</p>`;
         return;
       }
-      const order = new Map(sets.map((x, i) => [x.id, i]));
-      const setName = new Map(sets.map(x => [x.id, x.name]));
-      list.sort((a, b) => (order.get(setIdFromCardId(a.id, a.localId)) ?? 1e6) - (order.get(setIdFromCardId(b.id, b.localId)) ?? 1e6));
-      showResults(list.slice(0, 80).map(c => ({ ...c, setName: setName.get(setIdFromCardId(c.id, c.localId)) })),
-        list.length > 80 ? `${list.length} Karten gefunden, die ersten 80 nach Erscheinen. Grenze mit einem genaueren Namen oder der Nummer ein.` : "", setHits);
+      const cap = 80, main = (top.length ? top : r.others.map(withSet)).slice(0, cap);
+      const rest = top.length ? r.others.map(withSet).slice(0, Math.max(0, cap - main.length)) : [];
+      const msg = [r.msg, r.total > cap ? `${r.total} Karten gefunden, gezeigt werden ${cap}. Mit Set oder Nummer geht es genauer.` : ""].filter(Boolean).join(" ");
+      showResults(main, esc(msg), r.setHits, rest.length ? { title: "Weitere japanische Karten dieses Pokémon", list: rest } : null);
     } catch (e) {
       res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
     }
+  }
+
+  // Japanische Karte, die TCGdex nicht führt (z. B. Eevee Heroes): mit den englischen Angaben anlegen
+  function pickGhost(g) {
+    if (!g) return;
+    pick(null, { manual: true, id: null, name: g.name, localId: "", image: g.image, dexId: g.dexId, rarity: "",
+      set: { id: g.setId, name: g.setLabel, cardCount: { official: g.official } } });
   }
 
   // Alle Karten mit dieser Nummer in Sets mit dieser offiziellen Kartenzahl (null = kein solches Set)
@@ -1257,18 +1596,20 @@ function openAdd() {
     }
   }
 
-  async function pick(id) {
+  async function pick(id, manual = null) {
     res.innerHTML = `<p class="muted">Karte wird geladen …</p>`;
     try {
-      const c = await tcg(`${lang()}/cards/${encodeURIComponent(id)}`);
+      const c = manual || await tcg(`${lang()}/cards/${encodeURIComponent(id)}`);
       // Namen in Englisch und Deutsch als Alternativen (z. B. venusaur|bisaflor), Titel sind oft gemischt.
       // Japanische Karten werden auf eBay mit englischem Namen angeboten: über die Pokédex-Nummer nachschlagen.
       let enName = s.lang === "en" ? c.name : null, deName = s.lang === "de" ? c.name : null;
       if (s.lang === "jp") {
         const dex = Array.isArray(c.dexId) ? c.dexId[0] : null;
         const first = async l => dex ? (await tcg(`${l}/dex-ids/${dex}`).then(r => (r && r.cards && r.cards[0]) || null).catch(() => null)) : null;
-        const [e1, d1] = await Promise.all([first("en"), first("de")]);
-        enName = (e1 && e1.name) || s.enHint || null;
+        // Englischer Name mit Zusatz (Umbreon VMAX, Dark Charizard): aus der englischen Vorlage der Suche, sonst über die Pokédex-Nummer
+        const [d1, e1] = await Promise.all([first("de"),
+          manual ? manual.name : (s.enNames.get(c.id) || jxEnglishName(tcg, c, s.enHint).catch(() => null))]);
+        enName = e1 || s.enHint || null;
         deName = d1 && d1.name || null;
       } else {
         const other = await tcg(`${s.lang === "en" ? "de" : "en"}/cards/${encodeURIComponent(id)}`).catch(() => null);
@@ -1278,8 +1619,9 @@ function openAdd() {
       s.picked = c;
       s.baseName = s.lang === "jp" ? (enName || c.name) : c.name;
       // Offizielle Setgröße nur bei reinen Zahlen (GG05, TG12 usw. haben eigene Zählungen)
-      const official = /^\d+$/.test(String(c.localId)) ? (c.set && c.set.cardCount && c.set.cardCount.official) : null;
-      const nums = numberTerms(c.localId, official);
+      const setOfficial = c.set && c.set.cardCount && c.set.cardCount.official;
+      const official = /^\d+$/.test(String(c.localId)) ? setOfficial : null;
+      const nums = numberTerms(c.localId, official, s.lang === "jp");
       const baseName = s.baseName;   // JP: englischer Name, so steht er in eBay-Titeln
       const k1 = keyName(baseName), k2 = other.name ? keyName(other.name) : "";
       const nameTerm = [...new Set([k1, k2].filter(Boolean))].join("|");
@@ -1291,7 +1633,7 @@ function openAdd() {
       const searchTerm = `${baseName}${numText ? " " + numText : ""}${s.lang === "jp" ? " Japanese" : ""} PSA 10`;
       const warns = criteriaWarnings(c);
       const imgUrl = c.image ? `${c.image}/low.webp` : null;
-      const exists = state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang);
+      const exists = c.id ? state.cards.find(x => x.tcgdex_id === c.id && String(x.language) === s.lang) : null;
       res.innerHTML = `
         ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
         <div class="preview">
@@ -1299,13 +1641,15 @@ function openAdd() {
           <div>
             <h3>${esc(c.name)}</h3>
             ${s.lang === "jp" && enName && enName !== c.name ? `<p class="muted">${esc(enName)}</p>` : ""}
-            <p class="muted">${esc(setName)}${noNum ? "" : `, Nr. ${esc(c.localId)}${official ? "/" + esc(official) : ""}`}</p>
-            <p class="muted">${esc(c.rarity || "")}</p>
+            <p class="muted">${esc(setName)}${noNum || manual ? "" : `, Nr. ${esc(c.localId)}${official ? "/" + esc(official) : ""}`}</p>
+            <p class="muted">${manual ? "Nicht in der Kartendatenbank, angelegt mit den englischen Angaben" + (imgUrl ? " (Bild der englischen Karte)" : "") : esc(c.rarity || "")}</p>
           </div>
         </div>
         ${warns.length ? `<p class="critwarn" role="note"><b>Abweichung von deinen bisherigen Kriterien:</b> ${esc(warns.join("; "))}. Hinzufügen geht trotzdem.</p>` : ""}
         ${exists ? `<p class="critwarn" role="note"><b>Schon in deiner Liste</b>${exists.active ? "" : " (pausiert)"}: ${esc(exists.name)}.</p>` : ""}
         <div class="addform">
+          ${manual ? `<label>Nummer der japanischen Karte<input id="fnum" placeholder="z. B. 095" autocomplete="off">
+            <small class="hint">Steht unten auf der Karte, z. B. 095/${esc(setOfficial || "069")}. Name, Suchbegriff und Pflichtbegriffe passen sich an.</small></label>` : ""}
           <label>Name in der Übersicht<input id="fname" value="${esc(display)}"></label>
           <label>eBay-Suchbegriff<input id="fsearch" value="${esc(searchTerm)}">
             <small class="hint">Damit sucht der Scout laufende Auktionen und verkaufte Exemplare.</small></label>
@@ -1321,8 +1665,16 @@ function openAdd() {
           <p class="err" id="saveerr"></p>
         </div>`;
       const back = $("#back", sheet);
-      if (back) back.onclick = () => showResults(s.results);
-      $("#save", sheet).onclick = () => save(c, imgUrl, setName, official);
+      if (back) back.onclick = () => showResults(...s.view);
+      if (manual) $("#fnum", sheet).oninput = e => {
+        const lid = e.target.value.trim().toUpperCase().replace(/^#/, "").replace(/\s*\/.*$/, "");
+        c.localId = lid;
+        const off = /^\d+$/.test(lid) ? setOfficial : null, nn = numberTerms(lid, off, true), nt = lid ? (off ? nn.search : lid) : "";
+        $("#fname", sheet).value = `${baseName}${nt ? " " + nt : ""}${setName ? ` (${setName})` : ""} ${s.lang.toUpperCase()}`;
+        $("#fsearch", sheet).value = `${baseName}${nt ? " " + nt : ""} Japanese PSA 10`;
+        $("#fmust", sheet).value = [nameTerm, lid ? nn.must : ""].filter(Boolean).join(", ");
+      };
+      $("#save", sheet).onclick = () => save(c, imgUrl, setName, c.manual ? null : official);
     } catch (e) { res.innerHTML = `<p class="err">Karte konnte nicht geladen werden: ${esc(e.message)}</p>`; }
   }
 
@@ -1336,6 +1688,8 @@ function openAdd() {
     if (!/psa\s*10/i.test(search)) { err.textContent = "Der Suchbegriff sollte „PSA 10“ enthalten."; return; }
     if (!must.length) { err.textContent = "Mindestens ein Pflichtbegriff, sonst kommen fremde Karten durch."; return; }
     if (!(disc >= 0 && disc <= 60)) { err.textContent = "Abschlag bitte zwischen 0 und 60 %."; return; }
+    if (c.manual && !c.localId) { err.textContent = "Bitte die Nummer der japanischen Karte eintragen."; return; }
+    if (c.manual && /^\d+$/.test(c.localId)) official = c.set.cardCount.official || null;
     btn.disabled = true; err.textContent = "";
     const row = {
       id: slug(`${keyName(s.baseName || c.name)} ${c.localId} ${c.set ? c.set.id : ""} ${s.lang}`),
@@ -1354,7 +1708,7 @@ function openAdd() {
     }
     await reloadCards();
     s.picked = null;
-    showResults(s.results, `<b>${esc(name)}</b> ist im Snipe-Scout. Fairwert und Treffer kommen mit dem nächsten Lauf – sofort geht's über <a href="${SCOUT_ACTIONS}/workflows/comps-test.yml" target="_blank" rel="noopener">fairwert-test</a> (ca. 0,25 $ pro neue Karte).`);
+    showResults(s.view[0], `<b>${esc(name)}</b> ist im Snipe-Scout. Fairwert und Treffer kommen mit dem nächsten Lauf – sofort geht's über <a href="${SCOUT_ACTIONS}/workflows/comps-test.yml" target="_blank" rel="noopener">fairwert-test</a> (ca. 0,25 $ pro neue Karte).`, s.view[2], s.view[3]);
     const q = $("#q", sheet); if (q) q.select();
   }
 
