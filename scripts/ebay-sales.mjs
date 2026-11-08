@@ -23,6 +23,9 @@ const CFG = {
   actor: env.EBAY_ACTOR || "memo23~ebay-search-scraper-ppe",
   runBudget: num(env.EBAY_RUN_BUDGET_USD, 1.2),       // höchstens so viel pro Durchlauf (Schätzung)
   monthBudget: num(env.EBAY_MONTH_BUDGET_USD, 4.0),   // höchstens so viel pro Monat (Schätzung)
+  // Einzelabfrage (manueller Start mit Kartenangabe): nur diese Karte(n), unabhängig von Fälligkeit und Monatsbudget
+  onlyCard: String(env.EBAY_ONLY_CARD || "").trim(),
+  onlyBudget: num(env.EBAY_ONLY_BUDGET_USD, 2.0),
   topN: num(env.EBAY_TOP_N, 15),                      // die wertvollsten Karten ...
   topEveryDays: num(env.EBAY_TOP_EVERY_DAYS, 7),      // ... werden so oft abgefragt
   restEveryDays: num(env.EBAY_REST_EVERY_DAYS, 14),   // alle übrigen so oft
@@ -237,8 +240,24 @@ async function main() {
     throw new Error("Tabelle ebay_runs nicht lesbar. Wurde update5.sql in Supabase ausgeführt? " + e.message);
   }
   const spent = runsThisMonth.reduce((s, r) => s + Math.max(Number(r.est_cost_usd || 0), Number(r.apify_cost_usd || 0)), 0);
-  const available = Math.max(0, Math.min(CFG.runBudget, CFG.monthBudget - spent));
-  log(`Budget: Monat ${CFG.monthBudget.toFixed(2)} $, bisher ${spent.toFixed(2)} $, dieser Lauf höchstens ${available.toFixed(2)} $.`);
+  // Einzelabfrage: Karte über Namen ("Machamp" oder "Machamp | Expedition") oder den Anfang der Karten-ID finden
+  const onlyIds = new Set();
+  if (CFG.onlyCard) {
+    const nz = (x) => String(x || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    const [qName, qSet] = CFG.onlyCard.split("|").map(nz);
+    let hits = cards.filter((c) => qName.length >= 6 && /^[0-9a-f-]+$/.test(qName) && c.id.startsWith(qName));
+    if (!hits.length) hits = cards.filter((c) => nz(c.name) === qName && (!qSet || nz(c.set_name).includes(qSet)));
+    if (!hits.length) hits = cards.filter((c) => nz(c.name).includes(qName) && (!qSet || nz(c.set_name).includes(qSet)));
+    const list = hits.map((c) => `${c.name} (${c.set_name || "?"} ${c.card_number || ""}, ${c.language}, ${c.condition || ""}, ID ${c.id.slice(0, 8)})`).join("; ");
+    if (!hits.length) log(`Einzelabfrage "${CFG.onlyCard}": keine passende Karte gefunden, es wird nur neu gerechnet.`);
+    else if (hits.length > 5) log(`Einzelabfrage "${CFG.onlyCard}": ${hits.length} Karten passen, bitte genauer angeben (Name | Set oder ID-Anfang). Gefunden: ${list}`);
+    else { for (const c of hits) onlyIds.add(c.id); log(`Einzelabfrage "${CFG.onlyCard}": ${list}`); }
+  }
+  // Einzelabfrage: eigenes kleines Budget, auch wenn das Monatsbudget erreicht ist (die Kosten zählen trotzdem zum Monat)
+  const available = CFG.onlyCard
+    ? (onlyIds.size ? Math.min(CFG.onlyBudget, CFG.runBudget) : 0)
+    : Math.max(0, Math.min(CFG.runBudget, CFG.monthBudget - spent));
+  log(`Budget: Monat ${CFG.monthBudget.toFixed(2)} $, bisher ${spent.toFixed(2)} $, dieser Lauf höchstens ${available.toFixed(2)} $${CFG.onlyCard ? " (Einzelabfrage)" : ""}.`);
 
   // Wie viele Treffer braucht eine Suche? Aus den gespeicherten Verkäufen der letzten 90 Tage:
   // Treffer pro Tag (Suche mit Setnamen: alle; Nummernsuche: Titel mit der eigenen Nummer) × Tage seit der
@@ -283,7 +302,7 @@ async function main() {
   if (CFG.apifyToken && budget > 0) {
     const picked = new Set();
     ranked.forEach((c, i) => {
-      if (picked.has(c.id) || !isDue(c, i)) return;
+      if (picked.has(c.id) || !(CFG.onlyCard ? onlyIds.has(c.id) : isDue(c, i))) return;
       const ss = searchesFor(c);
       const est = ss.reduce((a, x) => a + x.est + x.expected * detailShare * COST.detailPage, 0);
       if (est > budget) return;
@@ -642,7 +661,7 @@ async function main() {
      Je Stufe die wertvollsten Karten zuerst. Verkäufe anderer Karten, bewertete Karten und Sammelangebote werden
      übersprungen. Nicht mehr abrufbare Angebote werden nach zwei Versuchen aufgegeben. */
   const imgBudget = Math.min(CFG.imageBudget, available - estSoFar() - 0.02);
-  if (CFG.imageBudget > 0 && CFG.apifyToken && imgBudget > COST.detailRun + COST.detailPage) {
+  if (!CFG.onlyCard && CFG.imageBudget > 0 && CFG.apifyToken && imgBudget > COST.detailRun + COST.detailPage) {
     const since = new Date(now - CFG.imageMaxDays * DAY).toISOString();
     const recent = await sbAll(`ebay_sales?select=${saleCols}&excluded=eq.false&parsed->>imageTried=is.null&sold_at=gte.${since}&order=sold_at.desc`);
     // Preisvorschlag ohne bekannten Betrag (auch bei Zeilen, deren Detailseite vor dieser Auswertung gelesen wurde)
