@@ -388,6 +388,25 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .hist svg{width:100%;height:120px;display:block}
 .range{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px;white-space:nowrap}
 .ctab{width:100%;border-collapse:collapse;font-size:15px;margin-top:4px}
+.manual{margin-top:16px;padding-top:12px;border-top:.5px solid var(--line)}
+.manual h4{margin:0 0 4px;font-size:15px;font-weight:600;color:var(--ink)}
+.manual p{margin:4px 0}
+.mform{display:grid;gap:8px;margin-top:8px}
+.mform>input{margin:0}
+.mform small{font-size:12px;line-height:1.4}
+.mrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mrow label{display:flex;align-items:center;gap:6px;margin:0;font-size:13px}
+.mrow label input{margin:0}
+.mprice input{width:6.5em}
+.mdate input{width:auto}
+.mrow select{width:auto;flex:none;margin:0}
+.mrow button{flex:none}
+@media (max-width:520px){.mrow button{flex:1 0 100%}}
+.mlist{list-style:none;margin:6px 0;padding:0;font-size:14px}
+.mlist li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:.5px solid var(--line)}
+.mlist li>span{min-width:0;overflow-wrap:anywhere}
+.mdone summary{cursor:pointer;font-size:14px;color:var(--muted);margin-top:6px}
+.tag.manual{background:var(--tint);color:var(--accent)}
 .ctab th,.ctab td{padding:10px 4px;border-top:.5px solid var(--line);text-align:left;vertical-align:baseline;font-weight:400}
 .ctab thead th{border-top:0;color:var(--muted);font-size:12px;padding-top:0}
 .ctab td.num,.ctab th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -954,6 +973,13 @@ function relevant(card, sale) {
   return nameIn(card, t);
 }
 
+// Alle Wörter des Namens im Titel, Apostroph und Genitiv-s egal ("Giovanni's" passt zu "Giovannis" und "Giovanni")
+function nameWordsIn(name, title) {
+  const t = norm(title).replace(/['’´`]/g, "");
+  const words = norm(name).split(/\s+/).map((w) => w.replace(/['’´`]s$/, "").replace(/['’´`]/g, "")).filter(Boolean);
+  return words.length > 0 && words.every((w) => t.includes(w));
+}
+
 function nameIn(card, t) {
   const words = norm(card.name).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
   if (!words.length) return t.includes(norm(card.name).trim()); // kurze Namen wie Ho-oh, Mew
@@ -985,7 +1011,7 @@ function check(card, sale) {
   // Sprache
   if (sale.language) r.language = sale.language === card.language ? "match" : "mismatch";
   else {
-    const nameHit = norm(sale.title).includes(norm(card.name));
+    const nameHit = nameWordsIn(card.name, sale.title);
     // Japanische Karten tragen den englischen Namen; ein Namenstreffer sagt dort nichts über die Sprache
     r.language = card.language === "EN" || (nameHit && card.language !== "JP") ? "assumed" : "unknown";
   }
@@ -1040,6 +1066,9 @@ function matchCard(card, sales, opts = {}) {
     if (!s.soldAt) { ex.no_date++; reject(s, "no_date"); continue; }
     if (now - new Date(s.soldAt).getTime() > 365 * DAY) { ex.old++; reject(s, "old"); continue; }
     if (s.currency !== "EUR") { ex.other_currency++; reject(s, "other_currency"); continue; }
+    // Von dir per eBay-Link ergänzt: gehört zu dieser Karte. Sprache, Edition und Ausführung gelten als passend,
+    // nur der Zustand (bzw. die Note) entscheidet, in welcher Zeile der Verkauf zählt.
+    if (s.manual) { cands.push({ s, c: { ...check(card, s), language: "match", edition: "match", finish: "match" } }); continue; }
     if (!relevant(card, s)) { ex.irrelevant++; reject(s, "irrelevant"); continue; }
     if (card.graded) {
       if (!saleGradeFor(card, s).graded) { ex.ungraded++; reject(s, "ungraded"); continue; }
@@ -1192,13 +1221,24 @@ const tail = (card) => (card.grader ? EXCLUDE_GRADED : EXCLUDE);
 const patternPart = (card) => card.pattern === "masterball" ? "(masterball,master)" : card.pattern === "pokeball" ? "(pokeball,poke,pokéball)" : "";
 const finishPart = (card) => card.pattern ? patternPart(card) : card.finish === "reverse_holo" ? "reverse" : "";
 
+// Namen mit Apostroph ("Giovanni's Machamp", "Farfetch'd"): eBay sucht das Wort wörtlich, Verkäufer schreiben
+// aber auch "Giovannis" oder "Giovanni". Solche Wörter werden zur Oder-Gruppe aller Schreibweisen.
+function namePart(name) {
+  return String(name || "").trim().split(/\s+/).map((w) => {
+    if (!/['’´`]/.test(w)) return w;
+    const plain = w.replace(/['’´`]/g, "");
+    const stem = /['’´`]s$/i.test(w) ? w.replace(/['’´`]s$/i, "") : null;
+    return `(${[...new Set([w.replace(/[’´`]/g, "'"), plain, stem].filter(Boolean))].join(",")})`;
+  }).join(" ");
+}
+
 function buildQuery(card) {
   const jp = card.language === "JP";
   const terms = card.setId && ((jp && JP_SETS[card.setId] && JP_SETS[card.setId].terms) || SET_TERMS[card.setId]);
   // Japanische Setnamen (z. B. ポケモンカード151) stehen nicht in eBay-Titeln: ohne bekannte Begriffe kein Setteil
   const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : (jp ? null : card.setName);
   // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
-  return [card.name, setPart, finishPart(card), jp ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
+  return [namePart(card.name), setPart, finishPart(card), jp ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Suche 2: Name + Kartennummer. Trifft fast nur die eigene Karte und reicht dadurch viel weiter zurück
@@ -1214,7 +1254,7 @@ function buildNumberQuery(card) {
     nums = [...new Set([`${pre}${n.padStart(2, "0")}`, `${pre}${n}`])];
   }
   if (!nums.length) return null;
-  return [card.name, `(${nums.join(",")})`, finishPart(card), card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
+  return [namePart(card.name), `(${nums.join(",")})`, finishPart(card), card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Automatische Suchbegriffe einer Karte aus der Datenbank (Job und App nutzen dieselben). Beide Suchen laufen,
@@ -1275,6 +1315,54 @@ function toDbRow(cardId, sale, row) {
   };
 }
 
+// eBay-Artikelnummer aus einem Link (www.ebay.de/itm/Titel/123…, ?item=123…) oder der nackten Nummer
+function itemIdFrom(text) {
+  const t = String(text || "").trim();
+  const m = t.match(/\/itm\/(?:[^/?#]+\/)?(\d{9,15})(?:[/?#]|$)/) || t.match(/[?&](?:item|itm|iid)=(\d{9,15})/) || t.match(/^(\d{9,15})$/);
+  return m ? m[1] : null;
+}
+
+// Von Hand ergänzter Verkauf: Tabellenzeile aus der Detailseite (Preis, Datum, Merkmale) mit dem gewählten Zustand.
+// card: Kartenzeile aus der Datenbank; entry: { id, stage }. Ergebnis: { row } oder { msg } (warum nicht übernommen)
+function manualSaleRow(card, entry, detail, now = Date.now()) {
+  // Mit eingetipptem Preis: Die Seite liefert nur Datum, Titel, Bild und Herkunft. Fehlt sie (Angebot älter als
+  // etwa 90 Tage) oder nennt kein Datum, zählt dein Datum (sonst der Tag des Eintrags).
+  const typed = Number(entry.price) > 0 ? Math.round(Number(entry.price) * 100) / 100 : null;
+  if (typed != null) {
+    const r0 = manualSaleRow(card, { ...entry, price: null }, detail, now);
+    const fresh = r0.row;
+    const date = fresh ? fresh.sold_at : (entry.date ? `${entry.date}T12:00:00.000Z` : entry.at || new Date(now).toISOString());
+    if (now - new Date(date).getTime() > 365 * DAY) return { msg: "Der Verkauf ist älter als 12 Monate und zählt nicht für den Wert." };
+    const graded = Boolean(card.grader);
+    const row = fresh || {
+      card_id: card.id, item_id: String(entry.id), sold_at: date, price_eur: typed,
+      title: (detail && detail.title) || `eBay-Artikel ${entry.id}`, url: `https://www.ebay.de/itm/${entry.id}`,
+      parsed: { manual: true, graded, image: (detail && pickImage(detail, detail)) || null, raw: {},
+        ...(graded ? { gradeKey: gradeKey(card.grader, card.grade, card.grade_label), gradeUncertain: false } : { stage: entry.stage, stageSource: "manual" }) },
+    };
+    row.parsed = { ...row.parsed, manualPrice: typed };
+    return { row };
+  }
+  if (!detail) return { msg: "eBay hat die Seite nicht geliefert. Beendete Angebote zeigt eBay nur etwa 90 Tage. Mit eingetipptem Preis und Datum lässt sich der Verkauf trotzdem ergänzen." };
+  if (detail.sold === false) return { msg: "Laut eBay wurde der Artikel nicht verkauft." };
+  const soldAt = detail.endDate || null;
+  if (!soldAt || (detail.listingStatus && detail.listingStatus !== "ENDED")) return { msg: "Das Angebot läuft noch oder nennt kein Verkaufsdatum (z. B. Angebote mit mehreren Stück)." };
+  if (now - new Date(soldAt).getTime() > 365 * DAY) return { msg: "Der Verkauf ist älter als 12 Monate und zählt nicht für den Wert." };
+  // Ob ein Preisvorschlag angenommen wurde, steht nur in der Suchzeile. Ohne sie: Liegt der gezahlte Betrag
+  // (taxExclusivePrice) spürbar unter dem Angebotspreis, war es ein Preisvorschlag.
+  const r = detail.buyingFormat === "auction" ? null : offerRatio(detail);
+  const row = { ...detail, soldAt, bestOfferAccepted: r != null && r < 0.995 };
+  const sale = parseSale(row, detail);
+  if (!(sale.price > 0) || sale.currency !== "EUR") return { msg: "Kein Preis in Euro auf der Seite gefunden." };
+  const db = toDbRow(card.id, sale, row);
+  const graded = Boolean(card.grader);
+  db.parsed = {
+    ...db.parsed, manual: true, graded,
+    ...(graded ? { gradeKey: gradeKey(card.grader, card.grade, card.grade_label), gradeUncertain: false } : { stage: entry.stage, stageSource: "manual" }),
+  };
+  return { row: db };
+}
+
 // Tabellenzeile -> Verkauf für matchCard
 function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
@@ -1298,6 +1386,12 @@ function saleFromDb(r) {
   // Einfuhrumsatzsteuer nur, wo sie nicht schon im eBay-Preis steckt (Regel bei addImportVat)
   const bestOffer = facts.format !== "auction" && Boolean((raw && (raw.bestOfferAccepted || raw.priceIsAskingPrice)) || facts.offerChecked);
   facts.importVat = addImportVat(facts.country, facts.format, bestOffer, facts.vatIncluded);
+  // Von dir beim Ergänzen eingetippter Preis: gilt so, wie er ist (kein Preisvorschlag, keine Steuer obendrauf)
+  if (facts.manualPrice != null) {
+    if (price !== Number(facts.manualPrice)) facts.ebayPrice = price;
+    price = Number(facts.manualPrice);
+    facts.importVat = false; facts.priceUncertain = false; delete facts.offerPrice; delete facts.askingPrice;
+  }
   if (facts.importVat) {
     facts.ebayPrice = price;
     price = Math.round(price * (1 + IMPORT_VAT) * 100) / 100;
@@ -1374,7 +1468,7 @@ function withSiblingFacts(sale, sib) {
 // bei jedem Abruf etwas anders umrechnet (sonst würde derselbe Verkauf mehrfach gespeichert).
 const saleKey = (s) => `${s.itemId}|${String(s.soldAt || "").slice(0, 10)}`;
 
-return { parseSale, matchCard, buildQuery, autoQuery, autoQueries, cardFromRow, saleFromDb, snapshotPayload, stagesIn, saleKey, STAGES, setIdOf, queryKey, JP_SETS, GRADERS, gradeKey, parseGrade };
+return { parseSale, matchCard, buildQuery, autoQuery, autoQueries, cardFromRow, saleFromDb, snapshotPayload, stagesIn, saleKey, STAGES, setIdOf, queryKey, JP_SETS, GRADERS, gradeKey, parseGrade, itemIdFrom };
 })();
 /*EBAY-LOGIC-END*/
 
@@ -3581,6 +3675,7 @@ function saleTags(s, editable) {
   if (s.country && s.country !== "DE") t.push(COUNTRY_LABEL[s.country] || s.country);
   if (s.importVat) t.push("+19 % EUSt");
   const html = t.map(x => `<span class="tag">${esc(x)}</span>`);
+  if (s.manual) html.push(`<span class="tag manual" title="Von dir per eBay-Link ergänzt">von Hand</span>`);
   if (editable && s._id != null) html[1] = stageSelectHtml(s);
   return html.join("");
 }
@@ -3654,6 +3749,7 @@ async function openDetail(id) {
       <div id="originbox"></div>
       ${langReset ? `<p class="note" role="note">Sprache oder Grading geändert: Die Verkäufe der bisherigen Suche werden beim nächsten Lauf verworfen, die Karte wird neu gesucht.</p>` : ""}
       <div id="bycond"><p class="muted dsmall">Wird geladen …</p></div>
+      <div id="manualbox"></div>
     </section>
     <section class="dsec">
       <h3>Aussortierte Verkäufe</h3>
@@ -3751,6 +3847,7 @@ async function openDetail(id) {
     }
     const resF = origin ? compute(c, true) : res;
     renderByCond(resF);
+    renderManual();
 
     const box = $("#sales", sheet);
     if (!box) return;
@@ -3785,6 +3882,85 @@ async function openDetail(id) {
         <a class="stl" href="${esc(ebayItemUrl(r.item_id, r.url))}" target="_blank" rel="noopener" title="${esc(r.title)}">${esc(r.title)}</a>
         <button class="ghost sx" data-in="${r.id}">Wieder einbeziehen</button></li>`; }).join("")}</ul>` : ""}
       ${!total && !userEx.length ? `<p class="muted dsmall">Nichts aussortiert.</p>` : ""}`;
+  };
+
+  // Verkäufe von Hand ergänzen: Link vormerken (tcg_meta.manualSales), der Nachtjob lädt Preis und Datum
+  const manualList = () => (c.tcg_meta && Array.isArray(c.tcg_meta.manualSales)) ? c.tcg_meta.manualSales : [];
+  const manualResults = () => (c.tcg_meta && Array.isArray(c.tcg_meta.manualResults)) ? c.tcg_meta.manualResults : [];
+  const renderManual = (keep = {}) => {
+    const box = $("#manualbox", sheet);
+    if (!box || !rows) return;
+    const graded = isGraded(c);
+    const pend = manualList(), done = manualResults();
+    const stageSel = graded ? "" : `<select id="mstage" aria-label="Zustand des Verkaufs">${EBAY.STAGES.map(st => `<option value="${st}"${st === (keep.stage || c.condition) ? " selected" : ""}>${st}</option>`).join("")}</select>`;
+    box.innerHTML = `<div class="manual">
+      <h4>Verkauf von Hand ergänzen</h4>
+      <p class="muted dsmall">Fehlt ein Verkauf? eBay-Link einfügen${graded ? "" : " und Zustand wählen"}. Den Preis kannst du eintippen oder leer lassen, dann liest ihn der nächste Nachtlauf von der Angebotsseite. Datum, Titel und Bild holt der Nachtlauf in jedem Fall (etwa 0,005 $ je Link, dazu einmal etwa 0,03 $ pro Nacht). Der Verkauf zählt ${graded ? `für deine Note ${esc(gradeText(c))}` : "im gewählten Zustand"}, auch wenn der Titel nicht zur Suche passt.</p>
+      <form class="mform" id="mform">
+        <input id="mlink" type="url" inputmode="url" placeholder="https://www.ebay.de/itm/…" value="${esc(keep.link || "")}" autocomplete="off" aria-label="eBay-Link">
+        <div class="mrow">
+          ${stageSel}
+          <label class="mprice"><span class="muted">Preis €</span><input id="mprice" type="text" inputmode="decimal" placeholder="optional" value="${esc(keep.price || "")}" autocomplete="off" aria-label="Verkaufspreis in Euro, optional"></label>
+          <label class="mdate"><span class="muted">Datum</span><input id="mdate" type="date" value="${esc(keep.date || "")}" max="${new Date().toISOString().slice(0, 10)}" aria-label="Verkaufsdatum, optional"></label>
+          <button class="ghost" type="submit">Vormerken</button>
+        </div>
+        <small class="muted">Preis ohne Versand, so wie ein Käufer in Deutschland ihn gezahlt hat. Dein Preis zählt unverändert, auch bei Preisvorschlägen und Auslandsverkäufen. Das Datum brauchst du nur, wenn eBay das Angebot nicht mehr zeigt (älter als etwa 90 Tage); sonst gilt das Datum von eBay.</small>
+      </form>
+      <p class="err" id="mmsg" role="status">${esc(keep.msg || "")}</p>
+      ${pend.length ? `<ul class="mlist">${pend.map(m => `<li><span>Vorgemerkt: <a href="${esc(ebayItemUrl(m.id))}" target="_blank" rel="noopener">${esc(m.id)}</a>${m.stage && !graded ? ` <span class="tag">${esc(m.stage)}</span>` : ""}${m.price ? ` ${eur(m.price)}` : ""}${m.date ? ` · ${shortDate(m.date)}` : ""}<small class="muted"> · wird beim nächsten Nachtlauf geladen</small></span><button class="ghost" data-mrm="${esc(m.id)}">Entfernen</button></li>`).join("")}</ul>` : ""}
+      ${done.length ? `<details class="mdone"><summary>Ergebnis der letzten Ergänzungen (${done.length})</summary><ul class="mlist">${done.map(m => `<li><span>${m.ok
+        ? `<span class="up">Ergänzt</span> ${shortDate(m.at)}: <a href="${esc(ebayItemUrl(m.id))}" target="_blank" rel="noopener">${esc(m.title || m.id)}</a>, ${eur(m.price)}${m.stage && !graded ? ` <span class="tag">${esc(m.stage)}</span>` : ""}${m.typed ? `<small class="muted"> · dein Preis${m.fromPage ? "" : ", Angebotsseite nicht mehr abrufbar"}</small>` : ""}${m.existed ? `<small class="muted"> · war schon gespeichert, jetzt mit deinem Zustand</small>` : ""}`
+        : `<span class="down">Nicht übernommen</span> ${shortDate(m.at)}: <a href="${esc(ebayItemUrl(m.id))}" target="_blank" rel="noopener">${esc(m.id)}</a><small class="muted"> · ${esc(m.msg || "")}</small>`}</span></li>`).join("")}</ul>
+        <button class="ghost" data-mclear>Liste leeren</button></details>` : ""}
+    </div>`;
+    $("#mform", box).onsubmit = ev => { ev.preventDefault(); addManual(); };
+    box.onclick = ev => {
+      const rm = ev.target.closest("[data-mrm]");
+      if (rm) { rm.disabled = true; saveManual(manualList().filter(m => String(m.id) !== rm.dataset.mrm)); return; }
+      const cl = ev.target.closest("[data-mclear]");
+      if (cl) { cl.disabled = true; saveManual(manualList(), []); }
+    };
+  };
+  const saveManual = async (list, results = manualResults(), keep = {}) => {
+    const meta = { ...(c.tcg_meta || {}), manualSales: list };
+    if (results.length) meta.manualResults = results; else delete meta.manualResults;
+    if (!list.length) delete meta.manualSales;
+    const { error } = await db.from("cards").update({ tcg_meta: meta }).eq("id", id);
+    if (error) { renderManual({ ...keep, msg: "Speichern fehlgeschlagen: " + error.message }); return false; }
+    c.tcg_meta = meta;
+    renderManual();
+    return true;
+  };
+  const addManual = () => {
+    const link = $("#mlink", sheet).value.trim();
+    const stage = isGraded(c) ? null : $("#mstage", sheet).value;
+    const priceTxt = $("#mprice", sheet).value.trim(), date = $("#mdate", sheet).value || null;
+    const keep = { link, stage, price: priceTxt, date };
+    let price = null;
+    if (priceTxt) {
+      // 1.234,56 / 1234,56 / 1234.56
+      const v = Number(priceTxt.replace(/\s|€/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
+      if (!(v > 0) || v > 1000000) return renderManual({ ...keep, msg: "Preis bitte als Zahl eingeben, z. B. 24,90." });
+      price = Math.round(v * 100) / 100;
+    }
+    if (date && (new Date(date) > new Date() || Date.now() - new Date(date).getTime() > 365 * 86400000))
+      return renderManual({ ...keep, msg: "Das Datum muss in den letzten 12 Monaten liegen." });
+    const itemId = EBAY.itemIdFrom(link);
+    if (!itemId) return renderManual({ ...keep, msg: /ebay\.(us|to)\//i.test(link) ? "Kurzlinks kann die App nicht lesen. Bitte den Link der Angebotsseite (…/itm/123456789012) einfügen." : "Kein eBay-Link mit Artikelnummer erkannt (…/itm/123456789012)." });
+    if (manualList().some(m => String(m.id) === itemId)) return renderManual({ ...keep, msg: "Dieser Link ist schon vorgemerkt." });
+    // Schon gespeichert und in der gewählten Zeile gezählt? Dann ist nichts zu tun.
+    const have = rows.filter(r => r.item_id === itemId);
+    if (have.length) {
+      if (have.some(r => r.excluded)) return renderManual({ ...keep, msg: "Dieser Verkauf ist gespeichert, aber von dir ausgeschlossen. Unter „Aussortierte Verkäufe“ kannst du ihn wieder einbeziehen." });
+      const key = isGraded(c) ? null : stage;
+      const res = compute(isGraded(c) ? c : { ...c, condition: key });
+      if (res.used.some(x => x.itemId === itemId))
+        return renderManual({ ...keep, msg: `Dieser Verkauf ist schon erfasst${isGraded(c) ? "" : ` und zählt in ${key}`}.${isGraded(c) ? "" : " Den Zustand eines erfassten Verkaufs änderst du über sein Zustandslabel."}` });
+    }
+    const entry = { id: itemId, stage, at: new Date().toISOString() };
+    if (price != null) entry.price = price;
+    if (date) entry.date = date;
+    saveManual([...manualList(), entry], manualResults(), keep);
   };
 
   const renderByCond = res => {
