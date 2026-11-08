@@ -1205,6 +1205,11 @@ function numberVariants(number, setTotal) {
     `${String(n).padStart(3, "0")}/${ts.padStart(3, "0")}`])];
 }
 
+// Ausschlusswörter und Oder-Klammern: eBay.de wertet solche Suchen anders aus als einfache. Messung an 13 Karten
+// (8. Nov. 2026, live auf eBay.de): Im Schnitt liefern sie MEHR passende Verkäufe (1.213 zu 905), weil einfache Suchen
+// eBays großzügige Zuordnung auslösen und viele fremde Karten bringen. Bei einzelnen Karten verschwinden mit ihnen aber
+// fast alle Treffer (Machamp Expedition reverse: 0 statt 21 passende, Giovanni's Machamp: 3 statt 118). Für diese
+// Karten gibt es die einfache Ausweichsuche (plainQueries, tcg_meta.searchMode = "plain"), die der Nachtjob selbst wählt.
 const EXCLUDE = " -PSA -BGS -CGC -GSG -SGC -Beckett -graded -bewertet -slab -lot -bundle";
 
 // Suche 1: Name + Setbegriffe. Findet auch Titel ohne Kartennummer (gemessen gut jeder siebte passende Verkauf).
@@ -1221,16 +1226,9 @@ const tail = (card) => (card.grader ? EXCLUDE_GRADED : EXCLUDE);
 const patternPart = (card) => card.pattern === "masterball" ? "(masterball,master)" : card.pattern === "pokeball" ? "(pokeball,poke,pokéball)" : "";
 const finishPart = (card) => card.pattern ? patternPart(card) : card.finish === "reverse_holo" ? "reverse" : "";
 
-// Namen mit Apostroph ("Giovanni's Machamp", "Farfetch'd"): eBay sucht das Wort wörtlich, Verkäufer schreiben
-// aber auch "Giovannis" oder "Giovanni". Solche Wörter werden zur Oder-Gruppe aller Schreibweisen.
-function namePart(name) {
-  return String(name || "").trim().split(/\s+/).map((w) => {
-    if (!/['’´`]/.test(w)) return w;
-    const plain = w.replace(/['’´`]/g, "");
-    const stem = /['’´`]s$/i.test(w) ? w.replace(/['’´`]s$/i, "") : null;
-    return `(${[...new Set([w.replace(/[’´`]/g, "'"), plain, stem].filter(Boolean))].join(",")})`;
-  }).join(" ");
-}
+// Namen bleiben wie geschrieben. Eine Oder-Gruppe für Schreibweisen mit Apostroph ("(Giovanni's,Giovannis,Giovanni)")
+// lieferte gemessen 13 statt 62 Treffer; fehlende Verkäufe solcher Karten holt die einfache Ausweichsuche.
+const namePart = (name) => String(name || "").trim();
 
 function buildQuery(card) {
   const jp = card.language === "JP";
@@ -1259,7 +1257,30 @@ function buildNumberQuery(card) {
 
 // Automatische Suchbegriffe einer Karte aus der Datenbank (Job und App nutzen dieselben). Beide Suchen laufen,
 // die Ergebnisse werden zusammengeführt; doppelte Treffer erkennt der Job an der Artikelnummer.
+// Einfache Suchen ohne Ausschlüsse und Klammern (Ausweichsuche, siehe oben): Name + ein Setbegriff,
+// Name + Kartennummer in einer Schreibweise, jeweils mit "reverse"/Muster, Prüfdienst und bei japanischen Karten "japanese"
+function plainQueries(c) {
+  const id = setIdOf(c), jp = c.language === "JP";
+  const terms = (jp && JP_SETS[id] && JP_SETS[id].terms) || SET_TERMS[id];
+  const setPart = terms ? terms[0] : (jp ? "" : c.set_name || "");
+  const pattern = c.tcg_meta && PATTERNS[c.tcg_meta.pattern] ? c.tcg_meta.pattern : null;
+  const finish = c.finish || (c.foil ? "holo" : "non_holo");
+  const extra = [pattern || (finish === "reverse_holo" ? "reverse" : ""), jp ? "japanese" : "", c.grader && c.grade != null ? c.grader : ""].filter(Boolean);
+  const name = String(c.name || "").trim();
+  const out = [];
+  if (setPart) out.push([name, setPart, ...extra].join(" "));
+  const m = String(c.card_number || "").trim().match(/^0*(\d{1,3})$/);
+  const pm = String(c.card_number || "").trim().match(/^([A-Za-z]{2,3})0*(\d{1,3})$/);
+  if (!isPromoSet(c.set_name, id)) {
+    if (m && c.set_total) out.push([name, `${Number(m[1])}/${c.set_total}`, ...extra].join(" "));
+    else if (pm && !/^(h|sv)$/i.test(pm[1])) out.push([name, `${pm[1].toUpperCase()}${pm[2].padStart(2, "0")}`, ...extra].join(" "));
+  }
+  if (!out.length) out.push([name, ...extra].join(" "));
+  return [...new Set(out)];
+}
+
 function autoQueries(c) {
+  if (c.tcg_meta && c.tcg_meta.searchMode === "plain") return plainQueries(c);
   const card = { name: c.name, setName: c.set_name, setId: setIdOf(c), number: c.card_number, setTotal: c.set_total,
     finish: c.finish || (c.foil ? "holo" : "non_holo"), language: c.language, grader: c.grader && c.grade != null ? c.grader : null,
     pattern: c.tcg_meta && PATTERNS[c.tcg_meta.pattern] ? c.tcg_meta.pattern : null };
