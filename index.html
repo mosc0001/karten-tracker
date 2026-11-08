@@ -389,7 +389,12 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .range{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px;white-space:nowrap}
 .ctab{width:100%;border-collapse:collapse;font-size:15px;margin-top:4px}
 .manual{margin-top:16px;padding-top:12px;border-top:.5px solid var(--line)}
-.manual h4{margin:0 0 4px;font-size:15px;font-weight:600;color:var(--ink)}
+.manual>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-size:15px;font-weight:600;color:var(--ink);padding:2px 0}
+.manual>summary::-webkit-details-marker{display:none}
+.manual>summary::before{content:"";width:7px;height:7px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .15s;margin:0 4px 0 2px}
+.manual[open]>summary::before{transform:rotate(45deg)}
+.manual .mbadge{font-size:12px;font-weight:500;color:var(--accent);background:var(--tint);padding:1px 8px;border-radius:10px}
+.manual .mbody{padding-top:4px}
 .manual p{margin:4px 0}
 .mform{display:grid;gap:8px;margin-top:8px}
 .mform>input{margin:0}
@@ -3908,14 +3913,19 @@ async function openDetail(id) {
   // Verkäufe von Hand ergänzen: Link vormerken (tcg_meta.manualSales), der Nachtjob lädt Preis und Datum
   const manualList = () => (c.tcg_meta && Array.isArray(c.tcg_meta.manualSales)) ? c.tcg_meta.manualSales : [];
   const manualResults = () => (c.tcg_meta && Array.isArray(c.tcg_meta.manualResults)) ? c.tcg_meta.manualResults : [];
+  let manualOpen = false;
   const renderManual = (keep = {}) => {
     const box = $("#manualbox", sheet);
     if (!box || !rows) return;
     const graded = isGraded(c);
     const pend = manualList(), done = manualResults();
     const stageSel = graded ? "" : `<select id="mstage" aria-label="Zustand des Verkaufs">${EBAY.STAGES.map(st => `<option value="${st}"${st === (keep.stage || c.condition) ? " selected" : ""}>${st}</option>`).join("")}</select>`;
-    box.innerHTML = `<div class="manual">
-      <h4>Verkauf von Hand ergänzen</h4>
+    // eingeklappt; offen bleibt es, solange du darin arbeitest (Eingabe, Fehlermeldung) oder es selbst geöffnet hast
+    const open = manualOpen || Boolean(keep.link || keep.msg);
+    const nPend = pend.length;
+    box.innerHTML = `<details class="manual"${open ? " open" : ""}>
+      <summary><span>Verkauf von Hand ergänzen</span>${nPend ? `<span class="mbadge">${nPend} vorgemerkt</span>` : ""}</summary>
+      <div class="mbody">
       <p class="muted dsmall">Fehlt ein Verkauf? eBay-Link einfügen${graded ? "" : " und Zustand wählen"}. Den Preis kannst du eintippen oder leer lassen, dann liest ihn der nächste Nachtlauf von der Angebotsseite. Datum, Titel und Bild holt der Nachtlauf in jedem Fall (etwa 0,005 $ je Link, dazu einmal etwa 0,03 $ pro Nacht). Der Verkauf zählt ${graded ? `für deine Note ${esc(gradeText(c))}` : "im gewählten Zustand"}, auch wenn der Titel nicht zur Suche passt.</p>
       <form class="mform" id="mform">
         <input id="mlink" type="url" inputmode="url" placeholder="https://www.ebay.de/itm/…" value="${esc(keep.link || "")}" autocomplete="off" aria-label="eBay-Link">
@@ -3933,7 +3943,8 @@ async function openDetail(id) {
         ? `<span class="up">Ergänzt</span> ${shortDate(m.at)}: <a href="${esc(ebayItemUrl(m.id))}" target="_blank" rel="noopener">${esc(m.title || m.id)}</a>, ${eur(m.price)}${m.stage && !graded ? ` <span class="tag">${esc(m.stage)}</span>` : ""}${m.typed ? `<small class="muted"> · dein Preis${m.fromPage ? "" : ", Angebotsseite nicht mehr abrufbar"}</small>` : ""}${m.existed ? `<small class="muted"> · war schon gespeichert, jetzt mit deinem Zustand</small>` : ""}`
         : `<span class="down">Nicht übernommen</span> ${shortDate(m.at)}: <a href="${esc(ebayItemUrl(m.id))}" target="_blank" rel="noopener">${esc(m.id)}</a><small class="muted"> · ${esc(m.msg || "")}</small>`}</span></li>`).join("")}</ul>
         <button class="ghost" data-mclear>Liste leeren</button></details>` : ""}
-    </div>`;
+    </div></details>`;
+    $("details.manual", box).ontoggle = ev => { manualOpen = ev.target.open; };
     $("#mform", box).onsubmit = ev => { ev.preventDefault(); addManual(); };
     box.onclick = ev => {
       const rm = ev.target.closest("[data-mrm]");
