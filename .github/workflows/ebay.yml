@@ -6,6 +6,11 @@ on:
     # und hält das Budget ein. An Tagen ohne fällige Karten kostet er nichts.
     - cron: "40 4 * * *"
   workflow_dispatch:
+    inputs:
+      karte:
+        description: "Nur diese Karte abfragen (leer = normaler Lauf). Name, z. B. Machamp, oder Name | Set, z. B. Machamp | Expedition"
+        required: false
+        default: ""
 
 permissions:
   contents: write   # nur für das Lebenszeichen (leerer Commit), siehe letzter Schritt
@@ -37,6 +42,9 @@ jobs:
           EBAY_TOP_N: "15"
           EBAY_TOP_EVERY_DAYS: "7"
           EBAY_REST_EVERY_DAYS: "14"
+          # Einzelabfrage über "Run workflow" mit Kartenangabe: höchstens so viel, auch bei erreichtem Monatsbudget
+          EBAY_ONLY_CARD: ${{ github.event.inputs.karte }}
+          EBAY_ONLY_BUDGET_USD: "2.0"
 
       # GitHub schaltet zeitgesteuerte Workflows in öffentlichen Repositories ab,
       # wenn 60 Tage lang nichts im Repository passiert. Liegt der letzte Commit
