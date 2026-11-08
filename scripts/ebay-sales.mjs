@@ -165,8 +165,11 @@ async function main() {
   // Grading-Spalten (ab update-grading.sql) mitlesen; ohne sie laufen alle Karten als ungradet
   const gradeCols = await sb("cards?select=grader,grade,grade_label&limit=1").then(() => ",grader,grade,grade_label",
     () => { log("Hinweis: Grading-Spalten fehlen (update-grading.sql ausführen), alle Karten gelten als ungradet."); return ""; });
-  const cards = await sbAll(`cards?select=id,name,set_name,card_number,language,condition,finish,foil,first_edition,quantity,tcgdex_id,ebay_query,set_total,tcg_meta,ebay_checked_at${gradeCols}&order=created_at`);
-  log(`${cards.length} Karten.`);
+  // In der App ausgeblendete Karten (hidden_at, ab update-ausblenden.sql): nicht abfragen, keinen Tageswert schreiben
+  const hiddenCol = await sb("cards?select=hidden_at&limit=1").then(() => true, () => false);
+  const cardsAll = await sbAll(`cards?select=id,name,set_name,card_number,language,condition,finish,foil,first_edition,quantity,tcgdex_id,ebay_query,set_total,tcg_meta,ebay_checked_at${gradeCols}${hiddenCol ? ",hidden_at" : ""}&order=created_at`);
+  const cards = cardsAll.filter((c) => !c.hidden_at);
+  log(`${cards.length} Karten${cardsAll.length > cards.length ? ` (${cardsAll.length - cards.length} ausgeblendet, werden übersprungen)` : ""}.`);
 
   // Sprachwechsel in der App: Verkäufe der alten Suche verwerfen (die App selbst darf nicht löschen).
   // Die Karte ist von der App schon fällig gestellt und wird unten neu gesucht.
