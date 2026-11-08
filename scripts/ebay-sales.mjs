@@ -192,6 +192,28 @@ async function main() {
     } catch (e) { /* nächste Runde */ }
   });
 
+  // Zwillinge: Karten mit denselben Suchbegriffen (gleiche Karte, nur Zustand, Menge, Edition oder Note anders)
+  // finden bei eBay dieselben Verkäufe; welche davon passen, entscheidet erst die Auswertung je Karte.
+  // Eine neue Karte mit schon abgefragtem Zwilling übernimmt dessen Verkäufe, statt neu zu suchen (keine Apify-Kosten).
+  const twinKey = (c) => queriesOf(c).map((x) => qKey(x.q)).sort().join(" | ");
+  const twins = new Map();
+  for (const c of cards) { const k = twinKey(c); if (!twins.has(k)) twins.set(k, []); twins.get(k).push(c); }
+  const twinsOf = (c) => (twins.get(twinKey(c)) || []).filter((t) => t.id !== c.id);
+  // Gleiche Merkmale bis auf Zustand und Menge: dann gelten auch deine Ausschlüsse für den Zwilling
+  const sameCard = (a, b) => ["language", "first_edition", "finish", "foil", "grader", "grade", "grade_label"].every((k) => (a[k] ?? null) === (b[k] ?? null)) &&
+    ((a.tcg_meta && a.tcg_meta.pattern) || null) === ((b.tcg_meta && b.tcg_meta.pattern) || null);
+  for (const c of cards.filter((x) => !x.ebay_checked_at)) {
+    const donor = twinsOf(c).filter((t) => t.ebay_checked_at).sort((a, b) => String(b.ebay_checked_at).localeCompare(String(a.ebay_checked_at)))[0];
+    if (!donor) continue;
+    const rows = await sbAll(`ebay_sales?select=${saleCols},excluded&card_id=eq.${donor.id}&order=id`);
+    const same = sameCard(c, donor);
+    const copy = rows.map((r) => ({ ...r, card_id: c.id, excluded: same ? r.excluded : false }));
+    if (copy.length) await upsert("ebay_sales", copy, "card_id,item_id,sold_at,price_eur");
+    await sb(`cards?id=eq.${c.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ ebay_checked_at: donor.ebay_checked_at }) });
+    c.ebay_checked_at = donor.ebay_checked_at;
+    log(`Zwilling: ${c.name} (${c.set_name || ""}) übernimmt ${copy.length} Verkäufe einer gleichen Karte, keine neue Suche.`);
+  }
+
   // Reihenfolge nach bisherigem Wert (Cardmarket-Trend als Näherung, bis eBay-Werte vorliegen)
   const latest = await sbAll("card_latest_prices?select=card_id,source,price_eur,details");
   const valueOf = new Map(), hadEbay = new Set();
@@ -256,14 +278,23 @@ async function main() {
   const isDue = (c, i) => !c.ebay_checked_at || now - new Date(c.ebay_checked_at) > (i < CFG.topN ? CFG.topEveryDays : CFG.restEveryDays) * DAY;
   const dueTotal = ranked.filter(isDue).length;
   if (CFG.apifyToken && budget > 0) {
+    const picked = new Set();
     ranked.forEach((c, i) => {
-      if (!isDue(c, i)) return;
+      if (picked.has(c.id) || !isDue(c, i)) return;
       const ss = searchesFor(c);
       const est = ss.reduce((a, x) => a + x.est + x.expected * detailShare * COST.detailPage, 0);
       if (est > budget) return;
       budget -= est;
       searches.push(...ss);
+      picked.add(c.id);
       (c.ebay_checked_at ? update : backfill).push(c);
+      // Zwillinge laufen mit derselben Suche mit (gleiche Adresse, keine zusätzlichen Kosten) und bleiben so gleich aktuell
+      for (const t of twinsOf(c)) {
+        if (picked.has(t.id)) continue;
+        picked.add(t.id);
+        searches.push(...ss.map((x) => ({ ...x, card: t, est: 0, expected: 0 })));
+        (t.ebay_checked_at ? update : backfill).push(t);
+      }
     });
   } else if (!CFG.apifyToken) {
     log("APIFY_TOKEN fehlt: Es wird nur neu gerechnet, nichts abgefragt.");
