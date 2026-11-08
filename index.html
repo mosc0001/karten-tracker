@@ -432,6 +432,9 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 @media (min-width:600px){.dform{grid-template-columns:1.3fr 1fr .6fr 1fr}.fcond,.ffin{grid-column:auto}}
 .dactions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap}
 .dangerlink{background:none;border:0;padding:8px 0;color:var(--danger);font-weight:500}
+.dleft{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.hidbar{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:space-between}
+.hidlinkp{margin:10px 0 0;text-align:center}
 .sales{list-style:none;margin:8px 0 0;padding:0}
 .sale{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"sd sp" "st st" "stl sx";gap:4px 12px;padding:11px 0;border-top:.5px solid var(--line);align-items:center}
 .sale.hasimg{grid-template-columns:2.8rem minmax(0,1fr) auto;grid-template-areas:"img sd sp" "img st st" "img stl sx"}
@@ -2172,7 +2175,11 @@ async function loadMain(opts = {}) {
     $("#app").innerHTML = `<p class="err pad">Fehler beim Laden: ${esc(err.message)}</p>`;
     return;
   }
-  state.cards = c.data;
+  // Ausgeblendete Karten (Spalte hidden_at, ab update-ausblenden.sql) stehen nicht in der Sammlung, sondern in einer eigenen Ansicht
+  state.allCards = c.data;
+  state.hiddenN = c.data.filter(x => x.hidden_at).length;
+  if (!state.hiddenN) state.showHidden = false;
+  state.cards = c.data.filter(x => Boolean(x.hidden_at) === Boolean(state.showHidden));
   state.latest = {};
   for (const r of l.data) {
     if (!state.latest[r.card_id]) state.latest[r.card_id] = {};
@@ -2617,6 +2624,7 @@ function renderMain() {
             <div id="menu" class="menu" role="menu" hidden>
               <button role="menuitem" id="expcsv">Karten als CSV exportieren</button>
               <button role="menuitem" id="expbak">Komplette Sicherung (JSON)</button>
+              ${state.hiddenN ? `<button role="menuitem" id="hidmenu">${state.showHidden ? "Zurück zur Sammlung" : `Ausgeblendete Karten (${state.hiddenN})`}</button>` : ""}
               <a role="menuitem" href="snipe.html">Snipe-Scout öffnen</a>
               <button role="menuitem" id="logout">Abmelden</button>
               <a role="menuitem" href="https://github.com/mosc0001/karten-tracker/actions/workflows/ebay.yml" target="_blank" rel="noopener">eBay-Abfrage starten (GitHub)</a>
@@ -2624,8 +2632,9 @@ function renderMain() {
           </div>
         </div>
       </header>
-      <h1 class="ltitle">Meine Karten</h1>
+      <h1 class="ltitle">${state.showHidden ? "Ausgeblendete Karten" : "Meine Karten"}</h1>
       <p id="status" class="status" role="status"></p>
+      ${state.showHidden ? `<p class="banner hidbar" role="note"><span>Diese Karten zählen nicht im Gesamtwert deiner Sammlung und werden nicht mehr bei eBay abgefragt. Einblenden kannst du eine Karte in ihrer Ansicht.</span><button class="linkish" id="hidback">Zurück zur Sammlung</button></p>` : ""}
       ${needsUpdate4() ? `<p class="banner" role="note">Bitte update4.sql in Supabase ausführen. Danach nutzt die App die eBay-Zustände (NM, LP, MP, HP) und die Ausführung Non-Holo, Holo oder Reverse Holo. Bis dahin ist Speichern gesperrt, damit nichts falsch umgeschlüsselt wird.</p>` : ""}
       ${needsUpdate5() ? `<p class="banner" role="note">Bitte update5.sql in Supabase ausführen und die neuen Dateien (ebay-logic.mjs, ebay-sales.mjs, ebay.yml) ins Repository legen. Erst dann entstehen eBay-Werte.</p>` : ""}
       ${jobStatus().banners}
@@ -2646,12 +2655,13 @@ function renderMain() {
           ${missing ? `<button class="linkish" id="showmissing">${missing} ${missing === 1 ? "Eintrag" : "Einträge"} ohne belastbaren Wert anzeigen</button>` : ""}
         </div>
         </div>
-        <div class="spark">${totalChart()}</div>
+        ${state.showHidden ? "" : `<div class="spark">${totalChart()}</div>`}
       </section>
       <div id="shelves">${shelvesHtml(all, withProv)}</div>
       ${state.cards.length ? `<h2 class="section-title" id="alltitle">Alle Karten</h2>` : ""}
       ${filters}
       <div id="listwrap"></div>
+      ${state.hiddenN && !state.showHidden ? `<p class="hidlinkp"><button class="linkish" id="hidlink">${state.hiddenN} ${state.hiddenN === 1 ? "ausgeblendete Karte" : "ausgeblendete Karten"} anzeigen</button></p>` : ""}
       <p class="note">Wert = Median der eBay-Verkäufe (ebay.de), die zu Sprache, Zustand, Ausführung und Edition deiner Karte passen: 90 Tage, bei weniger als 3 Verkäufen 12 Monate. Karten mit weniger als 3 Verkäufen zeigen einen vorläufigen Wert in Grau und zählen nicht in der Summe. Preise bei angenommenen Preisvorschlägen sind Angebotspreise.</p>
     </div>
     <button id="add" class="primary fab">Karte hinzufügen</button>`;
@@ -2668,6 +2678,8 @@ function renderMain() {
   $("#logout").onclick = () => db.auth.signOut();
   $("#expcsv").onclick = () => { closeMenu(); exportCsv(); };
   $("#expbak").onclick = () => { closeMenu(); exportBackup(); };
+  const toggleHidden = () => { closeMenu(); state.showHidden = !state.showHidden; resetFilters(); loadMain({ quiet: true }); window.scrollTo(0, 0); };
+  for (const sel of ["#hidmenu", "#hidlink", "#hidback"]) { const b = $(sel); if (b) b.onclick = toggleHidden; }
   const mb = $("#menubtn"), menu = $("#menu");
   mb.onclick = e => {
     e.stopPropagation();
@@ -3747,7 +3759,7 @@ function statsHtml(c, e) {
 }
 
 async function openDetail(id) {
-  const c = state.cards.find(x => x.id === id);
+  const c = (state.allCards || state.cards).find(x => x.id === id);
   if (!c) return;
   const e0 = ebayOf(c);
   const pp = c.purchase_price_eur != null ? Number(c.purchase_price_eur) : null;
@@ -3806,7 +3818,7 @@ async function openDetail(id) {
         <label class="fwide">eBay-Suchbegriff (leer = automatisch, zwei Suchen: Setname und Kartennummer)<input id="eq" type="text" value="${esc(c.ebay_query || "")}" placeholder="${esc(EBAY.autoQueries(c).map(q => q.split(" -PSA")[0]).join("  +  "))}" autocomplete="off"></label>
       </div>
       <div class="dactions">
-        <button id="del" class="dangerlink">Karte löschen</button>
+        <span class="dleft"><button id="del" class="dangerlink">Karte löschen</button><button id="hide" class="linkish">${c.hidden_at ? "Wieder einblenden" : "Ausblenden"}</button></span>
         <button id="upd" class="primary">Änderungen speichern</button>
       </div>
       <p class="err" id="derr"></p>
@@ -4213,6 +4225,19 @@ async function openDetail(id) {
     else if (rows) await writeSnapshot({ ...c, ...patch }, compute({ ...c, ...patch }), Boolean((state.latest[id] || {}).ebay_sold));
     closeSheet();
     await loadMain({ quiet: true });
+  };
+
+  // Ausblenden: Karte bleibt mit allen Daten erhalten, steht aber nicht mehr in der Sammlung und wird nicht abgefragt
+  $("#hide", sheet).onclick = async () => {
+    const hide = !c.hidden_at;
+    const { error } = await db.from("cards").update({ hidden_at: hide ? new Date().toISOString() : null }).eq("id", id);
+    if (error) {
+      $("#derr", sheet).textContent = /hidden_at/.test(error.message) ? "Bitte zuerst update-ausblenden.sql in Supabase ausführen." : "Speichern fehlgeschlagen: " + error.message;
+      return;
+    }
+    closeSheet();
+    await loadMain({ quiet: true });
+    setStatusText(hide ? `${c.name} ist ausgeblendet. Über das Menü (···) → „Ausgeblendete Karten“ blendest du sie wieder ein.` : `${c.name} ist wieder in deiner Sammlung. Beim nächsten Nachtlauf wird sie bei eBay aktualisiert.`);
   };
 
   $("#del", sheet).onclick = async () => {
