@@ -759,7 +759,12 @@ async function main() {
     if (snap.details.counts) counted++;
     snaps.push({ card_id: c.id, captured_on: today, source: "ebay_sold", price_eur: snap.price, details: snap.details });
   }
-  if (snaps.length) await upsert("price_snapshots", snaps, "card_id,captured_on,source");
+  // Während des Laufs in der App gelöschte Karten auslassen (sonst bricht das Speichern am Fremdschlüssel ab)
+  const stillThere = new Set((await sbAll("cards?select=id")).map((r) => r.id));
+  const gone = snaps.filter((x) => !stillThere.has(x.card_id)).length;
+  if (gone) log(`${gone} Karte(n) wurden während des Laufs gelöscht und werden übersprungen.`);
+  const keep = snaps.filter((x) => stillThere.has(x.card_id));
+  if (keep.length) await upsert("price_snapshots", keep, "card_id,captured_on,source");
   log(`Werte berechnet: ${withValue} Karten mit eBay-Wert, davon ${counted} mit mindestens 3 Verkäufen (zählen im Gesamtwert).`);
 
   /* 7. Protokoll */
