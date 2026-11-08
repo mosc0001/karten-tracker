@@ -9,7 +9,7 @@
 
 import {
   parseSale, matchCard, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey, queryKey, setIdOf, numberVariants, autoQueries, withSiblingFacts,
-  manualSaleRow,
+  manualSaleRow, plainQueries,
 } from "./ebay-logic.mjs";
 
 const env = process.env;
@@ -32,6 +32,9 @@ const CFG = {
   imageBudget: num(env.EBAY_IMAGE_BUDGET_USD, 0),     // Bilder nachholen: höchstens so viel pro Lauf (0 = aus)
   imageMaxPages: num(env.EBAY_IMAGE_MAX_PAGES, 300),  // ... und höchstens so viele Detailseiten pro Lauf
   imageMaxDays: num(env.EBAY_IMAGE_MAX_DAYS, 85),     // nur Verkäufe, die eBay noch zeigt (etwa 90 Tage)
+  plainMaxCards: num(env.EBAY_PLAIN_MAX_CARDS, 10),   // Ausweichsuche: höchstens so viele Karten pro Lauf testen
+  plainMinSales: num(env.EBAY_PLAIN_MIN_SALES, 5),    // ... wenn eine Karte weniger passende Verkäufe (12 Monate) hat
+  plainRetryDays: num(env.EBAY_PLAIN_RETRY_DAYS, 180),// ... und frühestens nach so vielen Tagen erneut
   pollMs: num(env.EBAY_POLL_MS, 5000),
   pollMaxMs: num(env.EBAY_POLL_MAX_MS, 25 * 60 * 1000),
 };
@@ -474,6 +477,97 @@ async function main() {
 
   const estSoFar = () => stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow +
     stats.detailRuns * COST.detailRun + stats.detailPages * COST.detailPage;
+
+  /* 5f. Ausweichsuche: Bei manchen Karten lässt eBay.de mit Ausschlusswörtern und Oder-Klammern fast alle Treffer weg
+     (gemessen: Machamp Expedition reverse 0 statt 21, Giovanni's Machamp 3 statt 118 passende Verkäufe). Hat eine gerade
+     abgefragte Karte weniger als EBAY_PLAIN_MIN_SALES passende Verkäufe in 12 Monaten (jeder Zustand), sucht der Job
+     einmal mit einfachen Begriffen (plainQueries). Finden die mehr, sucht er die Karte künftig so (tcg_meta.searchMode).
+     Getestet wird eine Karte höchstens alle EBAY_PLAIN_RETRY_DAYS Tage. Karten mit eigenem Suchbegriff bleiben unberührt. */
+  const plainCount = (c, sales) => {
+    const res = matchCard(cardFromRow(c), sales, { now });
+    return res.relaxedN + res.rejected.filter((x) => x.reason === "condition" || x.reason === "unknown_condition").length;
+  };
+  const plainCand = CFG.apifyToken ? processed.filter((c) => !(c.ebay_query && c.ebay_query.trim()) && !(c.tcg_meta && c.tcg_meta.searchMode === "plain") &&
+    !(c.tcg_meta && c.tcg_meta.plainTried && now - new Date(c.tcg_meta.plainTried) < CFG.plainRetryDays * DAY)) : [];
+  if (plainCand.length) {
+    const stored = new Map();
+    for (let i = 0; i < plainCand.length; i += 40) {
+      const part = plainCand.slice(i, i + 40).map((c) => c.id).join(",");
+      for (const r of await sbAll(`ebay_sales?select=${saleCols}&card_id=in.(${part})&order=id`)) {
+        if (!stored.has(r.card_id)) stored.set(r.card_id, []);
+        stored.get(r.card_id).push(r);
+      }
+    }
+    const tests = [];
+    for (const c of plainCand) {
+      const rs = (stored.get(c.id) || []).filter((r) => !r.excluded);
+      const before = plainCount(c, rs.map(saleFromDb));
+      if (before < CFG.plainMinSales) tests.push({ c, before });
+    }
+    const plainEst = (n) => COST.searchRun + n * 2 * (COST.searchUrl + 80 * COST.searchRow);
+    let take = Math.min(tests.length, CFG.plainMaxCards);
+    while (take > 0 && plainEst(take) > available - estSoFar() - 0.05) take--;
+    if (tests.length) log(`Ausweichsuche: ${tests.length} Karte(n) mit weniger als ${CFG.plainMinSales} passenden Verkäufen, dieser Lauf testet ${take}.`);
+    const run = tests.slice(0, take);
+    if (run.length) {
+      const byQ = new Map();
+      for (const t of run) for (const q of plainQueries(t.c)) {
+        const k = qKey(q);
+        if (!byQ.has(k)) byQ.set(k, { q, tests: [] });
+        byQ.get(k).tests.push(t);
+      }
+      let got = null;
+      try {
+        const { items, usd } = await runActor({ startUrls: [...byQ.values()].map((x) => ({ url: searchUrl(x.q) })), marketplace: "ebay.de", detailedItems: false, maxItems: CFG.backfillRows, proxy },
+          "Ausweichsuche", available - estSoFar());
+        stats.searchRuns++; stats.urls += byQ.size;
+        if (usd !== null) { stats.apifyUsd += usd; stats.apifyUsdKnown = true; }
+        got = new Map();
+        for (const it of items) {
+          if (it._analytics || !it.itemId) continue;
+          stats.searchRows++;
+          const k = rowQuery(it);
+          if (!k) continue;
+          if (!got.has(k)) got.set(k, []);
+          got.get(k).push(it);
+        }
+        stats.ok++;
+      } catch (e) {
+        console.error(`Ausweichsuche fehlgeschlagen: ${e.message}`);
+        stats.failed++;
+      }
+      if (got) {
+        const rowsOf = new Map();
+        for (const [k, x] of byQ) for (const t of x.tests) {
+          if (!rowsOf.has(t.c.id)) rowsOf.set(t.c.id, []);
+          rowsOf.get(t.c.id).push(...(got.get(k) || []));
+        }
+        const save = [];
+        for (const t of run) {
+          const c = t.c;
+          const have = new Set((stored.get(c.id) || []).map((r) => saleKey(saleFromDb(r))));
+          const fresh = new Map();
+          for (const row of rowsOf.get(c.id) || []) {
+            const sale = parseSale(row);
+            if (!sale.soldAt) continue;
+            const k = saleKey(sale);
+            if (have.has(k) || fresh.has(k)) continue;
+            fresh.set(k, { sale, row });
+          }
+          const live = (stored.get(c.id) || []).filter((r) => !r.excluded).map(saleFromDb);
+          const after = plainCount(c, [...live, ...[...fresh.values()].map((x) => x.sale)]);
+          const better = after > t.before;
+          if (better) for (const { sale, row } of fresh.values()) save.push(toDbRow(c.id, sale, row));
+          const meta = { ...(c.tcg_meta || {}), plainTried: today, plainTest: { before: t.before, after } };
+          if (better) meta.searchMode = "plain";
+          await sb(`cards?id=eq.${c.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ tcg_meta: meta }) });
+          c.tcg_meta = meta;
+          log(`Ausweichsuche ${c.name} (${c.set_name || ""}): ${t.before} → ${after} passende Verkäufe${better ? ", sucht künftig einfach" : ", bleibt bei der bisherigen Suche"}.`);
+        }
+        if (save.length) await upsert("ebay_sales", save, "card_id,item_id,sold_at,price_eur");
+      }
+    }
+  }
 
   /* 5m. Von Hand ergänzte Verkäufe: In der App per eBay-Link vorgemerkt (tcg_meta.manualSales = [{ id, stage, at }]).
      Die Detailseite liefert Preis (bei Preisvorschlägen den gezahlten Betrag), Verkaufsdatum, Herkunft und Bild.
