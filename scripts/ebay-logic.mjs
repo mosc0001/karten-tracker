@@ -451,6 +451,13 @@ function relevant(card, sale) {
   return nameIn(card, t);
 }
 
+// Alle Wörter des Namens im Titel, Apostroph und Genitiv-s egal ("Giovanni's" passt zu "Giovannis" und "Giovanni")
+function nameWordsIn(name, title) {
+  const t = norm(title).replace(/['’´`]/g, "");
+  const words = norm(name).split(/\s+/).map((w) => w.replace(/['’´`]s$/, "").replace(/['’´`]/g, "")).filter(Boolean);
+  return words.length > 0 && words.every((w) => t.includes(w));
+}
+
 function nameIn(card, t) {
   const words = norm(card.name).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
   if (!words.length) return t.includes(norm(card.name).trim()); // kurze Namen wie Ho-oh, Mew
@@ -482,7 +489,7 @@ function check(card, sale) {
   // Sprache
   if (sale.language) r.language = sale.language === card.language ? "match" : "mismatch";
   else {
-    const nameHit = norm(sale.title).includes(norm(card.name));
+    const nameHit = nameWordsIn(card.name, sale.title);
     // Japanische Karten tragen den englischen Namen; ein Namenstreffer sagt dort nichts über die Sprache
     r.language = card.language === "EN" || (nameHit && card.language !== "JP") ? "assumed" : "unknown";
   }
@@ -537,6 +544,9 @@ export function matchCard(card, sales, opts = {}) {
     if (!s.soldAt) { ex.no_date++; reject(s, "no_date"); continue; }
     if (now - new Date(s.soldAt).getTime() > 365 * DAY) { ex.old++; reject(s, "old"); continue; }
     if (s.currency !== "EUR") { ex.other_currency++; reject(s, "other_currency"); continue; }
+    // Von dir per eBay-Link ergänzt: gehört zu dieser Karte. Sprache, Edition und Ausführung gelten als passend,
+    // nur der Zustand (bzw. die Note) entscheidet, in welcher Zeile der Verkauf zählt.
+    if (s.manual) { cands.push({ s, c: { ...check(card, s), language: "match", edition: "match", finish: "match" } }); continue; }
     if (!relevant(card, s)) { ex.irrelevant++; reject(s, "irrelevant"); continue; }
     if (card.graded) {
       if (!saleGradeFor(card, s).graded) { ex.ungraded++; reject(s, "ungraded"); continue; }
@@ -689,13 +699,24 @@ const tail = (card) => (card.grader ? EXCLUDE_GRADED : EXCLUDE);
 const patternPart = (card) => card.pattern === "masterball" ? "(masterball,master)" : card.pattern === "pokeball" ? "(pokeball,poke,pokéball)" : "";
 const finishPart = (card) => card.pattern ? patternPart(card) : card.finish === "reverse_holo" ? "reverse" : "";
 
+// Namen mit Apostroph ("Giovanni's Machamp", "Farfetch'd"): eBay sucht das Wort wörtlich, Verkäufer schreiben
+// aber auch "Giovannis" oder "Giovanni". Solche Wörter werden zur Oder-Gruppe aller Schreibweisen.
+export function namePart(name) {
+  return String(name || "").trim().split(/\s+/).map((w) => {
+    if (!/['’´`]/.test(w)) return w;
+    const plain = w.replace(/['’´`]/g, "");
+    const stem = /['’´`]s$/i.test(w) ? w.replace(/['’´`]s$/i, "") : null;
+    return `(${[...new Set([w.replace(/[’´`]/g, "'"), plain, stem].filter(Boolean))].join(",")})`;
+  }).join(" ");
+}
+
 export function buildQuery(card) {
   const jp = card.language === "JP";
   const terms = card.setId && ((jp && JP_SETS[card.setId] && JP_SETS[card.setId].terms) || SET_TERMS[card.setId]);
   // Japanische Setnamen (z. B. ポケモンカード151) stehen nicht in eBay-Titeln: ohne bekannte Begriffe kein Setteil
   const setPart = terms ? (terms.length === 1 ? terms[0] : `(${terms.join(",")})`) : (jp ? null : card.setName);
   // Reverse-Karten: gezielt nach "reverse" suchen, sonst sind die meisten bezahlten Zeilen normale Karten
-  return [card.name, setPart, finishPart(card), jp ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
+  return [namePart(card.name), setPart, finishPart(card), jp ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Suche 2: Name + Kartennummer. Trifft fast nur die eigene Karte und reicht dadurch viel weiter zurück
@@ -711,7 +732,7 @@ export function buildNumberQuery(card) {
     nums = [...new Set([`${pre}${n.padStart(2, "0")}`, `${pre}${n}`])];
   }
   if (!nums.length) return null;
-  return [card.name, `(${nums.join(",")})`, finishPart(card), card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
+  return [namePart(card.name), `(${nums.join(",")})`, finishPart(card), card.language === "JP" ? JP_WORDS : "", graderPart(card)].filter(Boolean).join(" ") + tail(card);
 }
 
 // Automatische Suchbegriffe einer Karte aus der Datenbank (Job und App nutzen dieselben). Beide Suchen laufen,
@@ -772,6 +793,54 @@ export function toDbRow(cardId, sale, row) {
   };
 }
 
+// eBay-Artikelnummer aus einem Link (www.ebay.de/itm/Titel/123…, ?item=123…) oder der nackten Nummer
+export function itemIdFrom(text) {
+  const t = String(text || "").trim();
+  const m = t.match(/\/itm\/(?:[^/?#]+\/)?(\d{9,15})(?:[/?#]|$)/) || t.match(/[?&](?:item|itm|iid)=(\d{9,15})/) || t.match(/^(\d{9,15})$/);
+  return m ? m[1] : null;
+}
+
+// Von Hand ergänzter Verkauf: Tabellenzeile aus der Detailseite (Preis, Datum, Merkmale) mit dem gewählten Zustand.
+// card: Kartenzeile aus der Datenbank; entry: { id, stage }. Ergebnis: { row } oder { msg } (warum nicht übernommen)
+export function manualSaleRow(card, entry, detail, now = Date.now()) {
+  // Mit eingetipptem Preis: Die Seite liefert nur Datum, Titel, Bild und Herkunft. Fehlt sie (Angebot älter als
+  // etwa 90 Tage) oder nennt kein Datum, zählt dein Datum (sonst der Tag des Eintrags).
+  const typed = Number(entry.price) > 0 ? Math.round(Number(entry.price) * 100) / 100 : null;
+  if (typed != null) {
+    const r0 = manualSaleRow(card, { ...entry, price: null }, detail, now);
+    const fresh = r0.row;
+    const date = fresh ? fresh.sold_at : (entry.date ? `${entry.date}T12:00:00.000Z` : entry.at || new Date(now).toISOString());
+    if (now - new Date(date).getTime() > 365 * DAY) return { msg: "Der Verkauf ist älter als 12 Monate und zählt nicht für den Wert." };
+    const graded = Boolean(card.grader);
+    const row = fresh || {
+      card_id: card.id, item_id: String(entry.id), sold_at: date, price_eur: typed,
+      title: (detail && detail.title) || `eBay-Artikel ${entry.id}`, url: `https://www.ebay.de/itm/${entry.id}`,
+      parsed: { manual: true, graded, image: (detail && pickImage(detail, detail)) || null, raw: {},
+        ...(graded ? { gradeKey: gradeKey(card.grader, card.grade, card.grade_label), gradeUncertain: false } : { stage: entry.stage, stageSource: "manual" }) },
+    };
+    row.parsed = { ...row.parsed, manualPrice: typed };
+    return { row };
+  }
+  if (!detail) return { msg: "eBay hat die Seite nicht geliefert. Beendete Angebote zeigt eBay nur etwa 90 Tage. Mit eingetipptem Preis und Datum lässt sich der Verkauf trotzdem ergänzen." };
+  if (detail.sold === false) return { msg: "Laut eBay wurde der Artikel nicht verkauft." };
+  const soldAt = detail.endDate || null;
+  if (!soldAt || (detail.listingStatus && detail.listingStatus !== "ENDED")) return { msg: "Das Angebot läuft noch oder nennt kein Verkaufsdatum (z. B. Angebote mit mehreren Stück)." };
+  if (now - new Date(soldAt).getTime() > 365 * DAY) return { msg: "Der Verkauf ist älter als 12 Monate und zählt nicht für den Wert." };
+  // Ob ein Preisvorschlag angenommen wurde, steht nur in der Suchzeile. Ohne sie: Liegt der gezahlte Betrag
+  // (taxExclusivePrice) spürbar unter dem Angebotspreis, war es ein Preisvorschlag.
+  const r = detail.buyingFormat === "auction" ? null : offerRatio(detail);
+  const row = { ...detail, soldAt, bestOfferAccepted: r != null && r < 0.995 };
+  const sale = parseSale(row, detail);
+  if (!(sale.price > 0) || sale.currency !== "EUR") return { msg: "Kein Preis in Euro auf der Seite gefunden." };
+  const db = toDbRow(card.id, sale, row);
+  const graded = Boolean(card.grader);
+  db.parsed = {
+    ...db.parsed, manual: true, graded,
+    ...(graded ? { gradeKey: gradeKey(card.grader, card.grade, card.grade_label), gradeUncertain: false } : { stage: entry.stage, stageSource: "manual" }),
+  };
+  return { row: db };
+}
+
 // Tabellenzeile -> Verkauf für matchCard
 export function saleFromDb(r) {
   const { raw, ...facts } = r.parsed || {};
@@ -795,6 +864,12 @@ export function saleFromDb(r) {
   // Einfuhrumsatzsteuer nur, wo sie nicht schon im eBay-Preis steckt (Regel bei addImportVat)
   const bestOffer = facts.format !== "auction" && Boolean((raw && (raw.bestOfferAccepted || raw.priceIsAskingPrice)) || facts.offerChecked);
   facts.importVat = addImportVat(facts.country, facts.format, bestOffer, facts.vatIncluded);
+  // Von dir beim Ergänzen eingetippter Preis: gilt so, wie er ist (kein Preisvorschlag, keine Steuer obendrauf)
+  if (facts.manualPrice != null) {
+    if (price !== Number(facts.manualPrice)) facts.ebayPrice = price;
+    price = Number(facts.manualPrice);
+    facts.importVat = false; facts.priceUncertain = false; delete facts.offerPrice; delete facts.askingPrice;
+  }
   if (facts.importVat) {
     facts.ebayPrice = price;
     price = Math.round(price * (1 + IMPORT_VAT) * 100) / 100;

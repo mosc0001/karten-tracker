@@ -9,6 +9,7 @@
 
 import {
   parseSale, matchCard, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey, queryKey, setIdOf, numberVariants, autoQueries, withSiblingFacts,
+  manualSaleRow,
 } from "./ebay-logic.mjs";
 
 const env = process.env;
@@ -440,6 +441,72 @@ async function main() {
     }
   }
 
+  const estSoFar = () => stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow +
+    stats.detailRuns * COST.detailRun + stats.detailPages * COST.detailPage;
+
+  /* 5m. Von Hand ergänzte Verkäufe: In der App per eBay-Link vorgemerkt (tcg_meta.manualSales = [{ id, stage, at }]).
+     Die Detailseite liefert Preis (bei Preisvorschlägen den gezahlten Betrag), Verkaufsdatum, Herkunft und Bild.
+     Gespeichert wird mit dem gewählten Zustand; ist der Verkauf schon gespeichert (z. B. als unpassend aussortiert),
+     wird diese Zeile übernommen statt eine zweite anzulegen. Kosten nur in Nächten mit vorgemerkten Links:
+     ein Apify-Lauf (COST.detailRun) plus COST.detailPage je Link. Das Ergebnis steht danach in tcg_meta.manualResults. */
+  const manualCards = cards.filter((c) => c.tcg_meta && Array.isArray(c.tcg_meta.manualSales) && c.tcg_meta.manualSales.length);
+  if (manualCards.length && CFG.apifyToken) {
+    const ids = [...new Set(manualCards.flatMap((c) => c.tcg_meta.manualSales.map((m) => String(m.id))))];
+    const est = COST.detailRun + ids.length * COST.detailPage;
+    if (est > available - estSoFar()) {
+      log(`Von Hand ergänzte Verkäufe: ${ids.length} Links vorgemerkt, aber kein Budget frei; nächster Lauf.`);
+    } else {
+      let got = null;
+      try {
+        const { items, usd } = await runActor({
+          startUrls: ids.map((id) => ({ url: `https://www.ebay.de/itm/${id}` })),
+          marketplace: "ebay.de", detailedItems: true, maxItems: ids.length, proxy,
+        }, "Von Hand ergänzte Verkäufe", est * 1.5);
+        stats.detailRuns++; stats.detailPages += ids.length;
+        if (usd !== null) { stats.apifyUsd += usd; stats.apifyUsdKnown = true; }
+        got = new Map();
+        for (const it of items) if (it.itemId) got.set(String(it.itemId), it);
+        stats.ok++;
+      } catch (e) {
+        console.error(`Von Hand ergänzte Verkäufe fehlgeschlagen (bleiben vorgemerkt): ${e.message}`);
+        stats.failed++;
+      }
+      if (got) {
+        const hasOverride = saleCols.includes("stage_override");
+        let okN = 0, failN = 0;
+        for (const c of manualCards) {
+          const entries = c.tcg_meta.manualSales;
+          const old = await sbAll(`ebay_sales?select=card_id,item_id,sold_at,price_eur&card_id=eq.${c.id}&item_id=in.(${[...new Set(entries.map((m) => String(m.id)))].join(",")})`);
+          const rows = [], results = [];
+          for (const m of entries) {
+            const { row, msg } = manualSaleRow(c, m, got.get(String(m.id)), now);
+            const at = now.toISOString();
+            if (!row) { results.push({ id: String(m.id), stage: m.stage || null, ok: false, msg, at }); failN++; continue; }
+            // schon gespeichert (gleicher Artikel, gleicher Tag): diese Zeile übernehmen, ihr Schlüssel bleibt
+            const same = old.find((o) => o.item_id === row.item_id && String(o.sold_at).slice(0, 10) === String(row.sold_at).slice(0, 10));
+            if (same) { row.sold_at = same.sold_at; row.price_eur = same.price_eur; }
+            row.excluded = false;
+            if (hasOverride) row.stage_override = row.parsed.graded ? null : (m.stage || null);
+            rows.push(row);
+            const price = row.parsed.manualPrice ?? row.parsed.offerPrice ?? row.price_eur;
+            results.push({ id: row.item_id, stage: m.stage || null, ok: true, at, title: row.title, price: Number(price), soldAt: row.sold_at, existed: Boolean(same), typed: row.parsed.manualPrice != null, fromPage: Boolean(row.parsed.hasDetail) });
+            okN++;
+          }
+          if (rows.length) await upsert("ebay_sales", rows, "card_id,item_id,sold_at,price_eur");
+          // frisch lesen: In der App kann während des Laufs ein weiterer Link dazugekommen sein, der bleibt vorgemerkt
+          const cur = ((await sb(`cards?select=tcg_meta&id=eq.${c.id}`)) || [])[0];
+          const curMeta = (cur && cur.tcg_meta) || c.tcg_meta;
+          const done = new Set(entries.map((m) => String(m.id)));
+          const meta = { ...curMeta, manualSales: (curMeta.manualSales || []).filter((m) => !done.has(String(m.id))),
+            manualResults: [...results, ...(curMeta.manualResults || [])].slice(0, 20) };
+          await sb(`cards?id=eq.${c.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ tcg_meta: meta }) });
+          c.tcg_meta = meta;
+        }
+        log(`Von Hand ergänzte Verkäufe: ${okN} übernommen, ${failN} nicht übernommen.`);
+      }
+    }
+  }
+
   /* 5b. Detailseiten nachholen (nur wenn EBAY_IMAGE_BUDGET_USD > 0) für gespeicherte Verkäufe, bei denen sie etwas klären:
      1. Verkäufe mit angenommenem Preisvorschlag, die in den Wert eingehen (nur die Detailseite nennt den gezahlten Betrag);
      2. Verkäufe ohne Detailseite, die nur an einem unbekannten Merkmal scheitern (meist der Zustand) –
@@ -449,8 +516,6 @@ async function main() {
      5. übrige Verkäufe ohne Bild unter "Nicht berücksichtigt".
      Je Stufe die wertvollsten Karten zuerst. Verkäufe anderer Karten, bewertete Karten und Sammelangebote werden
      übersprungen. Nicht mehr abrufbare Angebote werden nach zwei Versuchen aufgegeben. */
-  const estSoFar = () => stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow +
-    stats.detailRuns * COST.detailRun + stats.detailPages * COST.detailPage;
   const imgBudget = Math.min(CFG.imageBudget, available - estSoFar() - 0.02);
   if (CFG.imageBudget > 0 && CFG.apifyToken && imgBudget > COST.detailRun + COST.detailPage) {
     const since = new Date(now - CFG.imageMaxDays * DAY).toISOString();
