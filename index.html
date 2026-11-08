@@ -182,8 +182,10 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
   .filters>.factive{grid-area:active}
   .filters>.frow2{grid-area:sort;flex-wrap:nowrap}
 }
-@media (min-width:1100px){
-  .filters{grid-template-columns:minmax(240px,320px) minmax(0,1fr) auto;grid-template-areas:"search fbar sort" "active active active"}
+@media (min-width:760px){
+  /* am Rechner alle Schnellfilter zeigen: umbrechen statt seitlich scrollen und abschneiden */
+  .filters>.fbar{align-items:flex-start}
+  .filters>.fbar .fquick{flex-wrap:wrap;overflow:visible;-webkit-mask-image:none;mask-image:none;padding-right:0}
 }
 @media (min-width:760px) and (min-height:640px){
   .filters{position:sticky;top:var(--navh,56px);z-index:6;--bleed:calc((100vw - 100%) / 2);margin-left:calc(-1 * var(--bleed));margin-right:calc(-1 * var(--bleed));padding:10px var(--bleed);transition:background .2s,box-shadow .2s}
@@ -1369,7 +1371,7 @@ return { parseSale, matchCard, buildQuery, autoQuery, autoQueries, cardFromRow, 
 })();
 /*EBAY-LOGIC-END*/
 
-const state = { cards: [], latest: {}, daily: [], view: "list", filter: { q: "", set: "", status: [], finish: [], first: [], value: [], cond: [], graded: [], dupes: [], lang: [], sort: "value" } };
+const state = { cards: [], latest: {}, daily: [], view: "list", filter: { q: "", set: "", status: [], finish: [], first: [], value: [], cond: [], graded: [], dupes: [], bought: [], lang: [], sort: "value" } };
 const triedImages = new Set();
 const YEAR_KEY = "kt_set_years_v1";
 try { state.setYears = JSON.parse(localStorage.getItem(YEAR_KEY) || "{}") || {}; } catch (e) { state.setYears = {}; }
@@ -2664,6 +2666,7 @@ const FGROUPS = [
   { key: "cond", label: "Zustand", opts: [["NM", "NM"], ["LP", "LP"], ["MP", "MP"], ["HP", "HP"]] },
   { key: "graded", label: "Grading", opts: [["raw", "Ungegradet"], ["graded", "Gegradet"]] },
   { key: "dupes", label: "Menge", opts: [["1", "Doppelte (Menge über 1)"]] },
+  { key: "bought", label: "Einkauf", opts: [["1", "Mit Kaufpreis"], ["0", "Ohne Kaufpreis"]] },
   { key: "lang", label: "Sprache", opts: [["DE", "Deutsch"], ["EN", "Englisch"], ["JP", "Japanisch"]] },
 ];
 // Schnellfilter: Abkürzungen auf dieselben Gruppen
@@ -2673,6 +2676,7 @@ const QUICK = [
   { label: "1st Edition", key: "first", vals: ["1"] },
   { label: "Gegradet", key: "graded", vals: ["graded"] },
   { label: "Doppelte", key: "dupes", vals: ["1"] },
+  { label: "Gekauft", key: "bought", vals: ["1"] },
   { label: "über 20 €", key: "value", vals: ["v20", "v50", "v100"] },
   { label: "Vorläufig", key: "status", vals: ["prov"] },
 ];
@@ -2688,6 +2692,7 @@ function facetOf(key, r) {
     case "cond": return isGraded(c) ? "" : c.condition;
     case "graded": return isGraded(c) ? "graded" : "raw";
     case "dupes": return c.quantity > 1 ? "1" : "";
+    case "bought": return c.purchase_price_eur != null ? "1" : "0";
     case "lang": return c.language;
     default: return "";
   }
