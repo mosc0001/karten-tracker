@@ -466,7 +466,19 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .sale .sp small{display:block;font-weight:400;color:var(--muted);font-size:11px}
 .sale .stl{grid-area:stl;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;min-width:0}
 .sale .stl:hover{color:var(--accent)}
-.sale .sx{grid-area:sx;padding:4px 12px;font-size:13px;justify-self:end}
+.sale .sx{grid-area:sx;justify-self:end;display:flex;gap:6px}
+.sale .sx button{padding:4px 12px;font-size:13px}
+.sale .snote{grid-column:1/-1;font-size:13px;color:var(--ink);background:var(--fill);border-radius:8px;padding:6px 10px;overflow-wrap:anywhere}
+.sale.hasimg .snote,.sale.hasimg .nedit{grid-column:2/-1}
+.sale .snote.worse b{color:var(--down)}
+.sale .snote.better b{color:var(--up)}
+.sale .nedit{grid-column:1/-1;display:grid;gap:8px;background:var(--fill);border-radius:10px;padding:10px}
+.sale .nedit .nseg{margin:0}
+.sale .nedit .nseg button{font-size:13px;white-space:normal;padding:6px 8px}
+.sale .nedit .ntext{margin:0}
+.sale .nedit .nact{display:flex;justify-content:flex-end;gap:8px}
+.sale .nedit .nact button{padding:6px 14px;font-size:14px}
+.nmark{color:var(--accent)}
 .sale .simg{grid-area:img;align-self:start;width:2.8rem;height:3.8rem;border-radius:5px;overflow:hidden;background:var(--fill);display:block}
 .sale .simg img{width:100%;height:100%;object-fit:cover;display:block}
 .sale.off .sp{color:var(--muted)}
@@ -3547,24 +3559,39 @@ function openAdd(mode) {
     if (back) back.onclick = () => showResults(...s.view);
     res.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { const id2 = b.dataset.open; closeSheet(); openDetail(id2); });
     if (o.ballPatterns.length) wirePattern(sheet);
+    // Schreibweise wie auf eBay: "Latias-ex" → "Latias ex" (ebenso GX, V, VMAX, VSTAR)
+    const ebayName = n => String(n || "").replace(/-(?=(ex|gx|v|vmax|vstar)\b)/gi, " ").replace(/\s+/g, " ").trim();
+    // Deutsche Karten: englischer Set- und Kartenname (Verkäufer nutzen oft den englischen Setnamen, US-Verkäufer den englischen Namen)
+    const en = { name: null, set: null };
+    const de = s.lang === "DE";
     const upd = () => {
       const [grader, grade] = ($("#cgrade", sheet).value || "").split("|");
-      const nm = jp ? ($("#enname", sheet).value || "").trim() : c.name;
-      const row = { name: nm, set_name: c.set && c.set.name, card_number: c.localId || "", set_total: official, language: s.lang,
+      const nm = ebayName(jp ? ($("#enname", sheet).value || "").trim() : c.name);
+      const row = { name: nm, set_name: (de && en.set) || (c.set && c.set.name), card_number: c.localId || "", set_total: official, language: s.lang,
         finish: $("#finish", sheet).value, grader: null, grade: null, tcg_meta: { setId: o.sid, pattern: readPattern(sheet) } };
       const extra = [$("#first", sheet).checked ? "1st" : "", grader ? `${grader} ${grade}` : ""].filter(Boolean).join(" ");
       // einfache Suchbegriffe (ohne Ausschlüsse und Klammern): gemessen am verlässlichsten bei seltenen Karten.
       // Zuerst die Suche nach Kartennummer (genauer), dann nach Set (mehr Treffer, auch Titel ohne Nummer)
       const isNum = q => /\d+\/\d+|\b[A-Z]{2,3}\d{2}\b/.test(q);
       const qs = nm ? EBAY.plainQueries(row).map(q => extra ? `${q} ${extra}` : q).sort((a, b) => isNum(b) - isNum(a)) : [];
-      const de = q => `https://www.ebay.de/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=120`;
+      const deUrl = q => `https://www.ebay.de/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=120`;
       const com = q => `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=120`;
       const label = q => isNum(q) ? "Verkauft auf eBay.de · nach Kartennummer" : "Verkauft auf eBay.de · nach Set";
+      // eBay.com: bei deutschen Karten englischer Name + "german", sonst die Nummernsuche
+      const usQ = de && en.name && qs.length ? [qs[0].replace(nm, ebayName(en.name)), "german"].join(" ") : qs[0];
       $("#clinks", sheet).innerHTML = qs.length ? `<div class="clinks">
-        ${qs.map((q, i) => `<a class="${i ? "ghost" : "primary"} clink" href="${esc(de(q))}" target="_blank" rel="noopener"><span>${label(q)}</span><small>${esc(q)}</small></a>`).join("")}
-        <a class="ghost clink" href="${esc(com(qs[0]))}" target="_blank" rel="noopener"><span>Verkauft auf eBay.com (USA, Preise in $)</span><small>${esc(qs[0])}</small></a>
+        ${qs.map((q, i) => `<a class="${i ? "ghost" : "primary"} clink" href="${esc(deUrl(q))}" target="_blank" rel="noopener"><span>${label(q)}</span><small>${esc(q)}</small></a>`).join("")}
+        <a class="ghost clink" href="${esc(com(usQ))}" target="_blank" rel="noopener"><span>Verkauft auf eBay.com (USA, Preise in $)</span><small>${esc(usQ)}</small></a>
       </div>` : `<p class="err">Bitte den englischen Namen für die eBay-Suche eintragen.</p>`;
     };
+    if (de && c.id && !c.manual) {
+      Promise.all([tcg(`en/cards/${encodeURIComponent(c.id)}`).catch(() => null), setsFor("en").catch(() => [])]).then(([ec, sets]) => {
+        en.name = ec && ec.name || null;
+        const st = (sets || []).find(x => x.id === o.sid);
+        en.set = st ? st.name : (ec && ec.set && ec.set.name) || null;
+        if ($("#clinks", sheet)) upd();
+      });
+    }
     ["#finish", "#cgrade", "#first", "#pattern", "#enname"].forEach(sel => { const el = $(sel, sheet); if (el) { el.addEventListener("change", upd); el.addEventListener("input", upd); } });
     upd();
     res.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -3921,12 +3948,14 @@ async function openDetail(id) {
 
   let rows = null; // Verkäufe aus der Datenbank, null = nicht verfügbar
   let canSetStage = true; // false, solange die Spalte stage_override fehlt
+  let canNote = true;     // false, solange die Spalten note/note_cond fehlen (update-notizen.sql)
+  let editNote = null;    // Verkauf, dessen Notiz gerade bearbeitet wird
 
   let origin = "";
   try { origin = localStorage.getItem("kt_origin") || ""; } catch (e) { /* ohne Speicher */ }
   // filtered = true: nur Verkäufe der gewählten Herkunft (Anzeige); der Kartenwert nutzt immer alle
   const compute = (card, filtered = false) => {
-    let live = rows.filter(r => !r.excluded).map(r => ({ ...EBAY.saleFromDb(r), _id: r.id }));
+    let live = rows.filter(r => !r.excluded).map(r => ({ ...EBAY.saleFromDb(r), _id: r.id, _note: r.note || "", _nc: r.note_cond || null }));
     if (filtered && origin) live = live.filter(x => originOk(x, origin));
     return EBAY.matchCard(EBAY.cardFromRow(card), live);
   };
@@ -3940,13 +3969,25 @@ async function openDetail(id) {
     ? `${eur(s.price)}<small><s>${eur(s.askingPrice)}</s> Preisvorschlag</small>`
     : `${eur(s.price)}${s.priceUncertain ? `<small>Preisvorschlag, Betrag offen</small>` : ""}`;
 
-  const saleLi = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
+  // Notiz zu einem Verkauf: besser/schlechter als seine Zustandsstufe und freier Text (z. B. "Kante stark abgestoßen")
+  const NOTE_COND = { worse: "schlechter", better: "besser" };
+  const stageOfSale = s => isGraded(c) ? "" : (s.stage || "");
+  const noteHtml = s => !(s._note || s._nc) ? "" : `<span class="snote${s._nc ? " " + s._nc : ""}">${s._nc ? `<b>${s._nc === "worse" ? "▼" : "▲"} ${NOTE_COND[s._nc]} als ${esc(stageOfSale(s) || "die Stufe")}</b>` : ""}${s._note ? `${s._nc ? " · " : ""}${esc(s._note)}` : ""}</span>`;
+  const noteEditor = s => `<div class="nedit" data-for="${s._id}">
+      <div class="seg nseg" role="group" aria-label="Zustand im Vergleich zur Stufe">
+        ${[["worse", `schlechter als ${stageOfSale(s) || "Stufe"}`], ["", "passt"], ["better", `besser als ${stageOfSale(s) || "Stufe"}`]].map(([v, l]) => `<button type="button" data-nc="${v}"${(s._nc || "") === v ? ' class="on"' : ""}>${esc(l)}</button>`).join("")}
+      </div>
+      <input class="ntext" type="text" maxlength="200" value="${esc(s._note)}" placeholder="Notiz, z. B. Kante abgestoßen, Kratzer auf der Folie" aria-label="Notiz zum Verkauf">
+      <div class="nact"><button type="button" class="ghost" data-ncancel>Abbrechen</button><button type="button" class="primary" data-nsave="${s._id}">Speichern</button></div>
+    </div>`;
+  const saleLi = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}${s._nc ? " n-" + s._nc : ""}">
       ${saleImgHtml(s.image)}
       <span class="sd">${shortDate(s.soldAt)}</span>
       <span class="st">${saleTags(s, canSetStage && !isGraded(c))}</span>
       <span class="sp">${salePriceHtml(s)}</span>
       <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
-      <button class="ghost sx" data-x="${s._id}">Ausschließen</button>
+      <span class="sx">${canNote ? `<button class="ghost" data-note="${s._id}">${s._note || s._nc ? "Notiz ändern" : "Notiz"}</button>` : ""}<button class="ghost" data-x="${s._id}">Ausschließen</button></span>
+      ${editNote === s._id ? noteEditor(s) : noteHtml(s)}
     </li>`;
 
   const saleLiPlain = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
@@ -4136,7 +4177,10 @@ async function openDetail(id) {
       const can = list.length > 0;
       const isOpen = can && openStages.has(st);
       const price = h ? `<span class="${h.n >= 3 ? "" : "prov"}">${eur(h.value)}</span>` : `<span class="muted">–</span>`;
-      const n = h ? `${h.n} ${h.n === 1 ? "Verkauf" : "Verkäufe"}, ${h.basis}${h.n >= 3 ? "" : ", vorläufig"}` : "kein Verkauf";
+      const marks = h ? list.slice(0, h.n) : [];
+      const nW = marks.filter(x => x._nc === "worse").length, nB = marks.filter(x => x._nc === "better").length;
+      const markTxt = [nW ? `${nW} schlechter` : "", nB ? `${nB} besser` : ""].filter(Boolean).join(", ");
+      const n = h ? `${h.n} ${h.n === 1 ? "Verkauf" : "Verkäufe"}, ${h.basis}${h.n >= 3 ? "" : ", vorläufig"}${markTxt ? `<br><span class="nmark">davon ${markTxt}</span>` : ""}` : "kein Verkauf";
       const label = `<span class="chev" aria-hidden="true">${can ? (isOpen ? "▾" : "▸") : ""}</span>${st}`;
       const row = `<tr class="${[own ? "own" : "", can ? "can" : ""].join(" ").trim()}"${can ? ` data-stage="${st}"` : ""}>
         <th scope="row">${can ? `<button class="cbtn" data-stage="${st}" aria-expanded="${isOpen}">${label}</button>` : label}${own ? ` <span class="tag own-mark">deine Karte</span>` : ""}<small>${graded ? esc((EBAY.GRADERS.find(g => g.code === keyCard[st].grader) || { label: keyCard[st].grader }).label) : STAGE_NAMES[st]}</small></th>
@@ -4187,7 +4231,36 @@ async function openDetail(id) {
     await saveValue(c);
   };
 
+  const saveNote = async (rowId, note, nc) => {
+    const msg = $("#smsg", sheet);
+    const { error } = await db.from("ebay_sales").update({ note: note || null, note_cond: nc || null }).eq("id", rowId);
+    if (error) {
+      const t = /note/i.test(error.message) ? "Bitte zuerst update-notizen.sql in Supabase ausführen." : error.message;
+      if (msg) msg.textContent = "Notiz speichern fehlgeschlagen: " + t;
+      const ed = sheet.querySelector(`.nedit[data-for="${rowId}"]`);
+      if (ed && !ed.querySelector(".err")) ed.insertAdjacentHTML("beforeend", `<p class="err">${esc(t)}</p>`);
+      return;
+    }
+    const r = rows.find(x => x.id === rowId);
+    r.note = note || null; r.note_cond = nc || null;
+    editNote = null;
+    renderSales();
+  };
+  const onNoteClick = ev => {
+    const b = ev.target.closest("[data-note],[data-nc],[data-nsave],[data-ncancel]");
+    if (!b) return false;
+    if (b.dataset.note !== undefined) { editNote = Number(b.dataset.note); renderSales(); const i = sheet.querySelector(".nedit .ntext"); if (i) i.focus({ preventScroll: true }); return true; }
+    const ed = b.closest(".nedit");
+    if (b.dataset.nc !== undefined) { ed.querySelectorAll("[data-nc]").forEach(x => x.classList.toggle("on", x === b)); return true; }
+    if (b.dataset.ncancel !== undefined) { editNote = null; renderSales(); return true; }
+    const on = ed.querySelector("[data-nc].on");
+    b.disabled = true;
+    saveNote(Number(b.dataset.nsave), ed.querySelector(".ntext").value.trim(), on ? on.dataset.nc : "");
+    return true;
+  };
+
   const onSaleButton = ev => {
+    if (onNoteClick(ev)) return true;
     const b = ev.target.closest("[data-x],[data-in]");
     if (!b) return false;
     b.disabled = true;
@@ -4215,6 +4288,12 @@ async function openDetail(id) {
     setStage(Number(sel.dataset.sid), sel.value || null);
   };
   $("#bycond", sheet).addEventListener("change", onStageChange);
+  sheet.addEventListener("keydown", ev => {
+    if (ev.key !== "Enter" || !ev.target.classList.contains("ntext")) return;
+    ev.preventDefault();
+    const btn = ev.target.closest(".nedit").querySelector("[data-nsave]");
+    if (btn) btn.click();
+  });
   $("#sales", sheet).addEventListener("change", onStageChange);
   // Nicht direkt onSaleButton zuweisen: dessen Rückgabe "false" würde jeden anderen Klick (Dropdown, Links) blockieren
   $("#sales", sheet).onclick = ev => { onSaleButton(ev); };
@@ -4232,7 +4311,12 @@ async function openDetail(id) {
 
   const loadSales = cols => db.from("ebay_sales").select(cols)
     .eq("card_id", id).order("sold_at", { ascending: false }).limit(1000);
-  let loaded = await loadSales("id,item_id,sold_at,price_eur,title,url,parsed,excluded,stage_override");
+  let loaded = await loadSales("id,item_id,sold_at,price_eur,title,url,parsed,excluded,stage_override,note,note_cond");
+  if (loaded.error && /note/.test(loaded.error.message)) {
+    // update-notizen.sql noch nicht ausgeführt: ohne Notizen weiter
+    canNote = false;
+    loaded = await loadSales("id,item_id,sold_at,price_eur,title,url,parsed,excluded,stage_override");
+  }
   if (loaded.error && /stage_override/.test(loaded.error.message)) {
     // update-zustand.sql noch nicht ausgeführt: ohne Zustandsänderung weiter
     canSetStage = false;
