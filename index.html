@@ -3169,7 +3169,10 @@ document.addEventListener("click", e => {
     const key = u => String(u).replace(/\/s-l\d+\.\w+$/, "");
     const at = gal ? Math.max(0, gal.findIndex(u => key(u) === key(a.href))) : 0;
     const page = !gal && a.closest(".sale") && a.closest(".sale").querySelector("a.stl[href^='https://']");
-    openLightbox(a.href, im && im.currentSrc, "Angebotsfoto", gal, at, page ? page.href : null);
+    // Bei beendeten Angeboten zeigt eBay sonst nur eine Kurzansicht mit einem Foto; orig_cvip öffnet das Originalangebot mit allen Fotos
+    let orig = null;
+    if (page) { const u = new URL(page.href); u.searchParams.set("nordt", "true"); u.searchParams.set("orig_cvip", "true"); u.searchParams.set("rt", "nc"); orig = u.href; }
+    openLightbox(a.href, im && im.currentSrc, "Angebotsfoto", gal, at, orig);
     return;
   }
   const art = e.target.closest(".dart img");
