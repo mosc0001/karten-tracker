@@ -182,6 +182,20 @@ function pickImage(row, detail) {
   for (const c of cands) if (typeof c === "string" && EBAY_IMG.test(c)) return c;
   return null;
 }
+// Alle Angebotsfotos für die Bildergalerie. Nur die Detailseite liefert sie (die Suche nur ein Vorschaubild);
+// gespeicherte Zeilen behalten ihre Liste. Ohne Doppelte, höchstens 24; bei nur einem Foto nichts (spart Platz).
+function pickImages(row, detail) {
+  const src = detail && Array.isArray(detail.images) ? detail.images : row && Array.isArray(row.images) ? row.images : [];
+  const seen = new Set(), out = [];
+  for (const u of src) {
+    if (typeof u !== "string" || !EBAY_IMG.test(u)) continue;
+    const k = u.replace(/\/s-l\d+\.(jpg|jpeg|png|webp)$/i, "");
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(u);
+    if (out.length >= 24) break;
+  }
+  return out.length > 1 ? out : undefined;
+}
 
 /* ---------- Angenommener Preisvorschlag ---------- */
 // eBay zeigt auf der Detailseite den gezahlten Betrag und daneben den durchgestrichenen Angebotspreis. Apify liefert
@@ -383,6 +397,7 @@ export function parseSale(row, detail = null) {
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
     stage, stageSource, language, edition, variant, reprint, finish, pattern, conflicts,
     image: pickImage(row, detail),
+    images: pickImages(row, detail),
     country, location: locText || null, vatIncluded,
   };
 }
@@ -836,7 +851,7 @@ export function manualSaleRow(card, entry, detail, now = Date.now()) {
     const row = fresh || {
       card_id: card.id, item_id: String(entry.id), sold_at: date, price_eur: typed,
       title: (detail && detail.title) || `eBay-Artikel ${entry.id}`, url: `https://www.ebay.de/itm/${entry.id}`,
-      parsed: { manual: true, graded, image: (detail && pickImage(detail, detail)) || null, raw: {},
+      parsed: { manual: true, graded, image: (detail && pickImage(detail, detail)) || null, images: detail ? pickImages(null, detail) : undefined, raw: {},
         ...(graded ? { gradeKey: gradeKey(card.grader, card.grade, card.grade_label), gradeUncertain: false } : { stage: entry.stage, stageSource: "manual" }) },
     };
     row.parsed = { ...row.parsed, manualPrice: typed };
@@ -902,7 +917,7 @@ export function saleFromDb(r) {
 // Suchzeile einer gespeicherten Zeile rekonstruieren (für nachträgliche Detailseiten)
 export function rowFromDb(r) {
   const raw = (r.parsed && r.parsed.raw) || {};
-  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted, image: (r.parsed && r.parsed.image) || null,
+  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted, image: (r.parsed && r.parsed.image) || null, images: (r.parsed && r.parsed.images) || undefined,
     itemLocation: (r.parsed && r.parsed.location) || undefined, countryKnown: r.parsed && "country" in r.parsed ? r.parsed.country : null,
     vatIncludedKnown: r.parsed && typeof r.parsed.vatIncluded === "boolean" ? r.parsed.vatIncluded : null };
 }

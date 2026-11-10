@@ -742,6 +742,7 @@ async function main() {
             const fresh = parseSale(rowFromDb(r), d);
             const img = p.image || fresh.image;
             const np = img ? { ...p, image: img } : giveUp(p);
+            if (!p.images && fresh.images) np.images = fresh.images; // alle Fotos für die Galerie
             if (needOffer(r)) Object.assign(np, { offerChecked: fresh.offerChecked, offerPrice: fresh.offerPrice, askingPrice: fresh.askingPrice, priceUncertain: fresh.priceUncertain });
             row = { ...base, parsed: np };
           } else if (d) {
