@@ -389,6 +389,19 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .hist svg{width:100%;height:120px;display:block}
 .range{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px;white-space:nowrap}
 .ctab{width:100%;border-collapse:collapse;font-size:15px;margin-top:4px}
+.recent h4{margin:10px 0 6px;font-size:13px;color:var(--muted);font-weight:600}
+.rchips{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.rchip{display:flex;align-items:center;gap:8px;flex:none;max-width:230px;text-align:left;background:var(--fill);border:0;border-radius:12px;padding:6px 10px 6px 6px;color:var(--ink)}
+.rchip img{width:30px;height:42px;object-fit:cover;border-radius:3px}
+.rchip span{min-width:0}.rchip b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rchip small{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.clinks{display:grid;gap:8px;margin:14px 0 8px}
+.clink{display:block;text-align:center;text-decoration:none;border-radius:14px;padding:12px 14px}
+.clink span{display:block;font-weight:600}
+.clink small{display:block;font-size:12px;opacity:.75;margin-top:2px;overflow-wrap:anywhere}
+.cowned{background:var(--tint);border-radius:12px;padding:10px 12px;margin:10px 0;display:grid;gap:4px;font-size:14px}
+.cowned .linkish{text-align:left;padding:0}
 .manual{margin-top:16px;padding-top:12px;border-top:.5px solid var(--line)}
 .manual>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-size:15px;font-weight:600;color:var(--ink);padding:2px 0}
 .manual>summary::-webkit-details-marker{display:none}
@@ -495,6 +508,9 @@ const CONDITIONS = [["NM", "Near Mint or Better"], ["LP", "Lightly Played (Excel
 const COND_CODES = CONDITIONS.map(([v]) => v);
 const FINISHES = [["non_holo", "Non-Holo"], ["holo", "Holo"], ["reverse_holo", "Reverse Holo"]];
 const finishOf = c => c.finish || (c.foil ? "holo" : "non_holo");
+// kleine Merker nur in diesem Browser (Schnellcheck: Sprache, zuletzt geprüfte Karten); ohne Speicher läuft alles weiter
+const loadStore = k => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch (e) { return null; } };
+const saveStore = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* nicht gespeichert */ } };
 const isFoil = c => finishOf(c) !== "non_holo";
 // Muster der Reverse-Folie (Poké Ball, Master Ball), gespeichert in tcg_meta.pattern
 const PATTERN_LABEL = { pokeball: "Poké Ball", masterball: "Master Ball" };
@@ -1498,7 +1514,7 @@ function withSiblingFacts(sale, sib) {
 // bei jedem Abruf etwas anders umrechnet (sonst würde derselbe Verkauf mehrfach gespeichert).
 const saleKey = (s) => `${s.itemId}|${String(s.soldAt || "").slice(0, 10)}`;
 
-return { parseSale, matchCard, buildQuery, autoQuery, autoQueries, cardFromRow, saleFromDb, snapshotPayload, stagesIn, saleKey, STAGES, setIdOf, queryKey, JP_SETS, GRADERS, gradeKey, parseGrade, itemIdFrom };
+return { parseSale, matchCard, buildQuery, autoQuery, autoQueries, cardFromRow, saleFromDb, snapshotPayload, stagesIn, saleKey, STAGES, setIdOf, queryKey, JP_SETS, GRADERS, gradeKey, parseGrade, itemIdFrom, plainQueries };
 })();
 /*EBAY-LOGIC-END*/
 
@@ -2625,6 +2641,7 @@ function renderMain() {
           <div class="menuwrap">
             <button id="menubtn" class="iconbtn" aria-label="Menü" title="Menü" aria-haspopup="true" aria-expanded="false">${ICON_MORE}</button>
             <div id="menu" class="menu" role="menu" hidden>
+              <button role="menuitem" id="checkmenu">Schnellcheck (eBay-Verkäufe)</button>
               <button role="menuitem" id="expcsv">Karten als CSV exportieren</button>
               <button role="menuitem" id="expbak">Komplette Sicherung (JSON)</button>
               ${state.hiddenN ? `<button role="menuitem" id="hidmenu">${state.showHidden ? "Zurück zur Sammlung" : `Ausgeblendete Karten (${state.hiddenN})`}</button>` : ""}
@@ -2680,6 +2697,7 @@ function renderMain() {
   $("#addtop").onclick = openAdd;
   $("#logout").onclick = () => db.auth.signOut();
   $("#expcsv").onclick = () => { closeMenu(); exportCsv(); };
+  $("#checkmenu").onclick = () => { closeMenu(); openAdd("check"); };
   $("#expbak").onclick = () => { closeMenu(); exportBackup(); };
   const toggleHidden = () => { closeMenu(); state.showHidden = !state.showHidden; resetFilters(); loadMain({ quiet: true }); window.scrollTo(0, 0); };
   for (const sel of ["#hidmenu", "#hidlink", "#hidback"]) { const b = $(sel); if (b) b.onclick = toggleHidden; }
@@ -3111,23 +3129,26 @@ async function recognizeCard(base64) {
 }
 const numKey = x => String(x ?? "").trim().toUpperCase().replace(/^([A-Z]*)0*(\d)/, "$1$2");
 
-function openAdd() {
-  const s = { lang: "DE", picked: null, results: [], enNames: new Map(), ghosts: [], view: [[]] };
+// mode "check": Schnellcheck vor einem Kauf. Gleiche Kartensuche, statt des Formulars Links zu den eBay-Verkäufen.
+function openAdd(mode) {
+  const check = mode === "check";
+  const s = { lang: check ? (loadStore("kt_check_lang") || "EN") : "DE", picked: null, results: [], enNames: new Map(), ghosts: [], view: [[]] };
   const sheet = openSheet(`
-    <header class="sheet-head"><h2>Karte hinzufügen</h2><button class="ghost" data-close>Fertig</button></header>
+    <header class="sheet-head"><h2>${check ? "Schnellcheck" : "Karte hinzufügen"}</h2><button class="ghost" data-close>${check ? "Schließen" : "Fertig"}</button></header>
+    ${check ? `<p class="muted dsmall">Karte wählen, dann öffnen sich die verkauften Angebote auf eBay mit dem passenden Suchbegriff. Herkunft („aus USA“), Bilder und Zustand siehst du dort direkt in der Liste.</p><div id="recent"></div>` : ""}
     <div class="scanrow">
       <button id="scanbtn" class="primary">📷 Karte scannen</button>
       <input id="scanfile" type="file" accept="image/*" capture="environment" hidden>
       <p class="muted dsmall">Foto der Vorderseite, möglichst gerade, hell und ohne Spiegelung. Danach bestätigst du alles.</p>
     </div>
-    <div class="seg" id="langseg"><button data-l="DE" class="on">Deutsch</button><button data-l="EN">Englisch</button><button data-l="JP">Japanisch</button></div>
+    <div class="seg" id="langseg"><button data-l="DE"${s.lang === "DE" ? ' class="on"' : ""}>Deutsch</button><button data-l="EN"${s.lang === "EN" ? ' class="on"' : ""}>Englisch</button><button data-l="JP"${s.lang === "JP" ? ' class="on"' : ""}>Japanisch</button></div>
     <div class="searchrow">
       <input id="q" type="search" placeholder="Name, Set oder Nummer, z. B. Mewtu, Neo Genesis oder 6/105" enterkeyhint="search" autocomplete="off">
       <button id="sbtn" class="primary">Suchen</button>
     </div>
     <p class="muted dsmall" id="jphint" hidden>Japanisch: Suche mit den englischen Angaben, z. B. „Charizard ex 151“, „Umbreon VMAX Evolving Skies“ oder der englischen Nummer „Charizard ex 199/165“. Die japanische Entsprechung steht oben, bei gleicher Illustration mit Hinweis. Deutsche Namen, japanische Nummern (201/165) und Namen in Katakana gehen auch. Alte Karten bis Neo haben keine Nummer.</p>
     <div id="res"></div>
-    <p class="dsmall manuallink"><button class="linkish" id="manual">Karte nicht gefunden? Manuell anlegen</button></p>`);
+    ${check ? "" : `<p class="dsmall manuallink"><button class="linkish" id="manual">Karte nicht gefunden? Manuell anlegen</button></p>`}`);
 
   const res = $("#res", sheet);
   const lang = () => tcgLang(s.lang);
@@ -3139,8 +3160,13 @@ function openAdd() {
     $("#jphint", sheet).hidden = l !== "JP";
   };
 
+  if (check) {
+    $("#jphint", sheet).hidden = s.lang !== "JP";
+    renderRecent();
+  }
   sheet.querySelectorAll("#langseg button").forEach(b => b.onclick = () => {
     setLang(b.dataset.l);
+    if (check) saveStore("kt_check_lang", b.dataset.l);
     res.innerHTML = "";
     s.picked = null;
     s.results = [];
@@ -3479,6 +3505,71 @@ function openAdd() {
     };
   }
 
+  // Zuletzt geprüfte Karten: ein Tipp öffnet den Check wieder (gespeichert nur in diesem Browser)
+  function renderRecent() {
+    const box = $("#recent", sheet);
+    if (!box) return;
+    const list = (loadStore("kt_checks") || []).slice(0, 8);
+    box.innerHTML = list.length ? `<div class="recent"><h4>Zuletzt geprüft</h4><div class="rchips">${list.map((x, i) => `<button class="rchip" data-i="${i}">${x.img ? `<img src="${esc(x.img)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span><b>${esc(x.name)}</b><small>${esc(x.set || "")}${x.nr ? " · " + esc(x.nr) : ""} · ${esc(x.lang)}</small></span></button>`).join("")}</div></div>` : "";
+    box.querySelectorAll(".rchip").forEach(b => b.onclick = () => { const x = list[Number(b.dataset.i)]; setLang(x.lang); pick(x.id); });
+  }
+
+  function renderCheck(c, o) {
+    const jp = isJP();
+    const name = jp ? (s.enName || "") : c.name;
+    const official = c.set && c.set.cardCount && (c.set.cardCount.official || c.set.cardCount.total) || null;
+    const entry = { id: c.id, lang: s.lang, name: jp && s.enName ? s.enName : c.name, set: o.setLbl, nr: c.localId ? String(c.localId) + (official && /^\d+$/.test(String(c.localId)) ? "/" + official : "") : "", img: c.image ? `${c.image}/low.webp` : null };
+    saveStore("kt_checks", [entry, ...(loadStore("kt_checks") || []).filter(x => !(x.id === entry.id && x.lang === entry.lang))].slice(0, 12));
+    const owned = (state.cards || []).length ? cardRows().filter(r => r.c.tcgdex_id === c.id && r.c.language === s.lang) : [];
+    const grades = [["", "Ungradet"], ["PSA|10", "PSA 10"], ["PSA|9", "PSA 9"], ["PSA|8", "PSA 8"], ["PSA|7", "PSA 7"], ["CGC|10", "CGC 10"], ["CGC|9.5", "CGC 9.5"], ["CGC|9", "CGC 9"], ["BGS|10", "BGS 10"], ["BGS|9.5", "BGS 9.5"]];
+    res.innerHTML = `
+      ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
+      <div class="preview">
+        ${s.imageUrl ? `<img src="${esc(s.imageUrl)}" alt="" data-tid="${esc(c.id || "")}" onerror="imgFallback(this)">` : ""}
+        <div>
+          <h3>${esc(jp && s.enName ? s.enName : c.name)}</h3>
+          ${jp ? `<p class="muted">${esc(c.name)} · Japanisch</p>` : ""}
+          <p class="muted">${esc(o.setLbl)}${o.year}, ${o.nrLbl}</p>
+          <p class="muted">${esc(c.rarity || "")}</p>
+        </div>
+      </div>
+      ${owned.length ? `<div class="cowned"><b>In deiner Sammlung</b>${owned.map(r => `<button class="linkish" data-open="${esc(r.c.id)}">${esc(gradeText(r.c) || r.c.condition)}${finishOf(r.c) !== "non_holo" ? " · " + esc(FIN_LABEL[finishOf(r.c)] || "") : ""}: ${r.unit != null ? `${eur(r.unit)}${r.counted ? "" : " (vorläufig)"}` : "noch kein Wert"} · Verkäufe ansehen</button>`).join("")}</div>` : ""}
+      ${jp ? `<label>Name für die eBay-Suche (englisch)<input id="enname" type="text" value="${esc(name)}" placeholder="z. B. Charizard" autocomplete="off"></label>` : ""}
+      <div class="crow">
+        <label>Ausführung<select id="finish">${finishOptions(o.defFinish)}</select></label>
+        <label>Grading<select id="cgrade">${grades.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select></label>
+      </div>
+      ${o.ballPatterns.length ? patternFieldHtml(null, o.ballPatterns) : ""}
+      <label class="check"><input id="first" type="checkbox"> <span>1st Edition</span></label>
+      <div id="clinks"></div>
+      <p class="muted dsmall">eBay filtert verkaufte Karten nicht nach Zustand. Den Zustand liest du an Titel („NM“, „LP“, „Played“), Zustandsangabe und Bildern ab. Gegradete Exemplare tauchen auch bei „Ungradet“ auf.</p>`;
+    const back = $("#back", sheet);
+    if (back) back.onclick = () => showResults(...s.view);
+    res.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { const id2 = b.dataset.open; closeSheet(); openDetail(id2); });
+    if (o.ballPatterns.length) wirePattern(sheet);
+    const upd = () => {
+      const [grader, grade] = ($("#cgrade", sheet).value || "").split("|");
+      const nm = jp ? ($("#enname", sheet).value || "").trim() : c.name;
+      const row = { name: nm, set_name: c.set && c.set.name, card_number: c.localId || "", set_total: official, language: s.lang,
+        finish: $("#finish", sheet).value, grader: null, grade: null, tcg_meta: { setId: o.sid, pattern: readPattern(sheet) } };
+      const extra = [$("#first", sheet).checked ? "1st" : "", grader ? `${grader} ${grade}` : ""].filter(Boolean).join(" ");
+      // einfache Suchbegriffe (ohne Ausschlüsse und Klammern): gemessen am verlässlichsten bei seltenen Karten.
+      // Zuerst die Suche nach Kartennummer (genauer), dann nach Set (mehr Treffer, auch Titel ohne Nummer)
+      const isNum = q => /\d+\/\d+|\b[A-Z]{2,3}\d{2}\b/.test(q);
+      const qs = nm ? EBAY.plainQueries(row).map(q => extra ? `${q} ${extra}` : q).sort((a, b) => isNum(b) - isNum(a)) : [];
+      const de = q => `https://www.ebay.de/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=120`;
+      const com = q => `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13&_ipg=120`;
+      const label = q => isNum(q) ? "Verkauft auf eBay.de · nach Kartennummer" : "Verkauft auf eBay.de · nach Set";
+      $("#clinks", sheet).innerHTML = qs.length ? `<div class="clinks">
+        ${qs.map((q, i) => `<a class="${i ? "ghost" : "primary"} clink" href="${esc(de(q))}" target="_blank" rel="noopener"><span>${label(q)}</span><small>${esc(q)}</small></a>`).join("")}
+        <a class="ghost clink" href="${esc(com(qs[0]))}" target="_blank" rel="noopener"><span>Verkauft auf eBay.com (USA, Preise in $)</span><small>${esc(qs[0])}</small></a>
+      </div>` : `<p class="err">Bitte den englischen Namen für die eBay-Suche eintragen.</p>`;
+    };
+    ["#finish", "#cgrade", "#first", "#pattern", "#enname"].forEach(sel => { const el = $(sel, sheet); if (el) { el.addEventListener("change", upd); el.addEventListener("input", upd); } });
+    upd();
+    res.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
   async function pick(id, manual) {
     res.innerHTML = `<p class="muted">Karte wird geladen …</p>`;
     try {
@@ -3495,6 +3586,7 @@ function openAdd() {
       const year = sid && state.setYears[sid] ? ` (${state.setYears[sid]})` : "";
       const setLbl = jp && !manual ? jpSetLabel(sid, c.set && c.set.name) : (c.set && c.set.name || "");
       const nrLbl = !c.localId ? "ohne Nummer" : jp && jpNoNumber(sid) ? "ohne aufgedruckte Nummer" : `Nr. ${esc(c.localId)}${manual && c.set.cardCount.official ? "/" + c.set.cardCount.official : ""}`;
+      if (check) return renderCheck(c, { v, defFinish, ballPatterns, sid, setLbl, year, nrLbl });
       res.innerHTML = `
         ${s.results.length ? `<button class="linkish" id="back">Zurück zu den Treffern</button>` : ""}
         <div class="preview">
@@ -3614,7 +3706,7 @@ function openAdd() {
   }
 
   $("#sbtn", sheet).onclick = search;
-  $("#manual", sheet).onclick = () => manualForm();
+  if ($("#manual", sheet)) $("#manual", sheet).onclick = () => manualForm();
   $("#q", sheet).addEventListener("keydown", e => { if (e.key === "Enter") search(); });
   $("#q", sheet).focus();
 }
@@ -4274,7 +4366,12 @@ db.auth.onAuthStateChange((event, session) => {
   const id = session && session.user ? session.user.id : null;
   if (id === uid && event !== "INITIAL_SESSION") return;
   uid = id;
-  setTimeout(() => { id ? loadMain() : renderLogin(); }, 0);
+  setTimeout(async () => {
+    if (!id) return renderLogin();
+    // Lesezeichen/Homescreen mit …/index.html#check: Schnellcheck sofort öffnen, die Sammlung lädt dahinter
+    if (location.hash === "#check" && !state.checkOpened) { state.checkOpened = true; openAdd("check"); }
+    await loadMain();
+  }, 0);
 });
 })();
 </script>
