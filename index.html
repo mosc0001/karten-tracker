@@ -3105,7 +3105,7 @@ function openLightbox(big, small, alt, gallery, start = 0, link = null) {
   el.setAttribute("aria-label", alt || "Bild");
   el.innerHTML = `<img alt="${esc(alt || "")}"><button class="lbclose" aria-label="Schließen">✕</button>` + (list ? `
     <button class="lbnav lbprev" aria-label="Vorheriges Foto">‹</button><button class="lbnav lbnext" aria-label="Nächstes Foto">›</button>
-    <span class="lbcount" aria-live="polite"></span>` : link ? `<a class="lblink" href="${esc(link)}" target="_blank" rel="noopener noreferrer">Alle Fotos bei eBay ↗</a>` : "");
+    <span class="lbcount" aria-live="polite"></span>` : link ? `<a class="lblink" href="${esc(link)}" target="_blank" rel="noopener">Angebot bei eBay ↗</a>` : "");
   const img = el.querySelector("img");
   // erst das vorhandene Bild zeigen, dann das große nachladen
   const show = (src, placeholder) => {
@@ -3169,10 +3169,7 @@ document.addEventListener("click", e => {
     const key = u => String(u).replace(/\/s-l\d+\.\w+$/, "");
     const at = gal ? Math.max(0, gal.findIndex(u => key(u) === key(a.href))) : 0;
     const page = !gal && a.closest(".sale") && a.closest(".sale").querySelector("a.stl[href^='https://']");
-    // Bei beendeten Angeboten zeigt eBay sonst nur eine Kurzansicht mit einem Foto; orig_cvip öffnet das Originalangebot mit allen Fotos
-    let orig = null;
-    if (page) { const u = new URL(page.href); u.searchParams.set("nordt", "true"); u.searchParams.set("orig_cvip", "true"); u.searchParams.set("rt", "nc"); orig = u.href; }
-    openLightbox(a.href, im && im.currentSrc, "Angebotsfoto", gal, at, orig);
+    openLightbox(a.href, im && im.currentSrc, "Angebotsfoto", gal, at, page ? page.href : null);
     return;
   }
   const art = e.target.closest(".dart img");
@@ -3877,11 +3874,10 @@ const shortDate = iso => new Date(iso).toLocaleDateString("de-DE", { day: "2-dig
 // Mit epid leitet eBay bei nicht mehr verfügbaren Angeboten auf die allgemeine Produktseite um.
 function ebayItemUrl(itemId, url) {
   const id = String(itemId || "");
-  // nordt=true: eBay zeigt das beendete Angebot selbst, statt auf die allgemeine Produktseite umzuleiten;
-  // orig_cvip=true: das Originalangebot mit allen Fotos statt der Kurzansicht für verkaufte Artikel
-  if (/^\d{1,20}$/.test(id)) return `https://www.ebay.de/itm/${id}?nordt=true&orig_cvip=true&rt=nc`;
+  // nordt=true: eBay zeigt das beendete Angebot selbst, statt auf die allgemeine Produktseite umzuleiten
+  if (/^\d{1,20}$/.test(id)) return `https://www.ebay.de/itm/${id}?nordt=true`;
   const m = String(url || "").match(/^https:\/\/www\.ebay\.[a-z.]+\/itm\/(?:[^/?#]*\/)?(\d{1,20})/i);
-  if (m) return `https://www.ebay.de/itm/${m[1]}?nordt=true&orig_cvip=true&rt=nc`;
+  if (m) return `https://www.ebay.de/itm/${m[1]}?nordt=true`;
   return /^https:\/\/www\.ebay\.[a-z.]+\//i.test(url || "") ? String(url).split(/[?#]/)[0] : "#";
 }
 // Vorschaubild nur von eBays Bildserver; Größe über den Dateinamen (s-l225 klein, s-l1600 groß)
@@ -4087,7 +4083,7 @@ async function openDetail(id) {
       <span class="sd">${shortDate(s.soldAt)}</span>
       <span class="st">${saleTags(s, canSetStage && !isGraded(c))}</span>
       <span class="sp">${salePriceHtml(s)}</span>
-      <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener noreferrer" title="${esc(s.title)}">${esc(s.title)}</a>
+      <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
       <span class="sx">${canNote ? `<button class="ghost" data-note="${s._id}">${s._note || s._nc ? "Notiz ändern" : "Notiz"}</button>` : ""}<button class="ghost" data-x="${s._id}">Ausschließen</button></span>
       ${editNote === s._id ? noteEditor(s) : noteHtml(s)}
     </li>`;
@@ -4097,7 +4093,7 @@ async function openDetail(id) {
       <span class="sd">${shortDate(s.soldAt)}</span>
       <span class="st">${saleTags(s, canSetStage && !isGraded(c))}</span>
       <span class="sp">${salePriceHtml(s)}</span>
-      <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener noreferrer" title="${esc(s.title)}">${esc(s.title)}</a>
+      <a class="stl" href="${esc(ebayItemUrl(s.itemId, s.url))}" target="_blank" rel="noopener" title="${esc(s.title)}">${esc(s.title)}</a>
     </li>`;
 
   const renderSales = () => {
@@ -4155,7 +4151,7 @@ async function openDetail(id) {
       ${userEx.length ? `<p class="dsmall">Von dir ausgeschlossen:</p><ul class="sales">${userEx.map(r => { const im = r.parsed && r.parsed.image; return `<li class="sale${ebayImg(im, 225) ? " hasimg" : ""}">
         ${saleImgHtml(im, r.parsed && r.parsed.images)}
         <span class="sd">${shortDate(r.sold_at)}</span><span class="st"></span><span class="sp">${eur(Number(r.price_eur))}</span>
-        <a class="stl" href="${esc(ebayItemUrl(r.item_id, r.url))}" target="_blank" rel="noopener noreferrer" title="${esc(r.title)}">${esc(r.title)}</a>
+        <a class="stl" href="${esc(ebayItemUrl(r.item_id, r.url))}" target="_blank" rel="noopener" title="${esc(r.title)}">${esc(r.title)}</a>
         <button class="ghost sx" data-in="${r.id}">Wieder einbeziehen</button></li>`; }).join("")}</ul>` : ""}
       ${!total && !userEx.length ? `<p class="muted dsmall">Nichts aussortiert.</p>` : ""}`;
   };
