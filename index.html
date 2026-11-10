@@ -293,6 +293,13 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 /* feste Anzeigegröße (Kartenformat 63:88), damit auch kleine, selbst verlinkte Bilder groß erscheinen */
 .lightbox img{display:block;width:min(86vw,620px,calc(80vh * 63 / 88));height:auto;max-height:80vh;object-fit:contain;border-radius:14px;background:var(--fill);box-shadow:0 24px 70px rgba(0,0,0,.55);animation:lbzoom .22s cubic-bezier(.2,.8,.2,1)}
 .lightbox .lbclose{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:34px;height:34px;border-radius:50%;border:0;padding:0;font-size:18px;line-height:34px;color:#fff;background:rgba(60,60,67,.6);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);cursor:pointer}
+.lbgal img{cursor:pointer;touch-action:pan-y}
+.lightbox .lbnav{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;border:0;padding:0 0 3px;font-size:30px;line-height:36px;color:#fff;background:rgba(60,60,67,.6);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);cursor:pointer}
+.lightbox .lbprev{left:max(10px,calc(50% - min(43vw,310px,40vh * 63 / 88) - 56px))}
+.lightbox .lbnext{right:max(10px,calc(50% - min(43vw,310px,40vh * 63 / 88) - 56px))}
+.lightbox .lblink{position:absolute;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);padding:7px 14px;border-radius:16px;font-size:14px;font-weight:600;color:#fff;text-decoration:none;white-space:nowrap;background:rgba(60,60,67,.6);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.lightbox .lbcount{position:absolute;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);padding:4px 11px;border-radius:12px;font-size:13px;font-weight:600;color:#fff;background:rgba(60,60,67,.6);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);font-variant-numeric:tabular-nums}
+@media (hover:none){.lightbox .lbnav{width:34px;height:34px;font-size:26px;line-height:30px;background:rgba(60,60,67,.45)}}
 @keyframes lbfade{from{opacity:0}to{opacity:1}}
 @keyframes lbzoom{from{transform:scale(.92);opacity:.4}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.lightbox,.lightbox img{animation:none}}
@@ -479,7 +486,8 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
 .sale .nedit .nact{display:flex;justify-content:flex-end;gap:8px}
 .sale .nedit .nact button{padding:6px 14px;font-size:14px}
 .nmark{color:var(--accent)}
-.sale .simg{grid-area:img;align-self:start;width:2.8rem;height:3.8rem;border-radius:5px;overflow:hidden;background:var(--fill);display:block}
+.sale .simg{grid-area:img;align-self:start;width:2.8rem;height:3.8rem;border-radius:5px;overflow:hidden;background:var(--fill);display:block;position:relative}
+.sale .simgn{position:absolute;right:2px;bottom:2px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;font-size:10px;font-weight:600;line-height:15px;text-align:center;color:#fff;background:rgba(0,0,0,.62);font-variant-numeric:tabular-nums}
 .sale .simg img{width:100%;height:100%;object-fit:cover;display:block}
 .sale.off .sp{color:var(--muted)}
 details.more{margin-top:14px;font-size:14px;color:var(--muted)}
@@ -518,6 +526,14 @@ const fmtDate = d => d ? new Date(d + "T00:00:00").toLocaleDateString("de-DE", {
 // Zustand nach eBay-Skala für ungradete Karten (seit Update 4)
 const CONDITIONS = [["NM", "Near Mint or Better"], ["LP", "Lightly Played (Excellent)"], ["MP", "Moderately Played (Very Good)"], ["HP", "Heavily Played (Poor)"]];
 const COND_CODES = CONDITIONS.map(([v]) => v);
+// Feinere Einstufung deiner eigenen Karte (Spalte condition_fine: "+", "-" oder leer). Nur zur Anzeige:
+// Suche und Wert rechnen weiter mit der eBay-Stufe in condition.
+const FINE_SIGN = { "+": "+", "-": "−" };
+const fineOf = c => (c && !isGraded(c) && FINE_SIGN[c.condition_fine] ? c.condition_fine : null);
+const condLabel = c => (c ? `${c.condition}${fineOf(c) ? FINE_SIGN[fineOf(c)] : ""}` : "");
+// Auswahl "LP-" -> { condition: "LP", fine: "-" }
+const splitCond = v => { const m = String(v || "").match(/^(.*?)([+-])?$/); return { condition: m[1], fine: m[2] || null }; };
+const FINE_MSG = "Bitte zuerst update-feinzustand.sql in Supabase ausführen, dann erneut speichern.";
 const FINISHES = [["non_holo", "Non-Holo"], ["holo", "Holo"], ["reverse_holo", "Reverse Holo"]];
 const finishOf = c => c.finish || (c.foil ? "holo" : "non_holo");
 // kleine Merker nur in diesem Browser (Schnellcheck: Sprache, zuletzt geprüfte Karten); ohne Speicher läuft alles weiter
@@ -741,6 +757,20 @@ function pickImage(row, detail) {
   for (const c of cands) if (typeof c === "string" && EBAY_IMG.test(c)) return c;
   return null;
 }
+// Alle Angebotsfotos für die Bildergalerie. Nur die Detailseite liefert sie (die Suche nur ein Vorschaubild);
+// gespeicherte Zeilen behalten ihre Liste. Ohne Doppelte, höchstens 24; bei nur einem Foto nichts (spart Platz).
+function pickImages(row, detail) {
+  const src = detail && Array.isArray(detail.images) ? detail.images : row && Array.isArray(row.images) ? row.images : [];
+  const seen = new Set(), out = [];
+  for (const u of src) {
+    if (typeof u !== "string" || !EBAY_IMG.test(u)) continue;
+    const k = u.replace(/\/s-l\d+\.(jpg|jpeg|png|webp)$/i, "");
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(u);
+    if (out.length >= 24) break;
+  }
+  return out.length > 1 ? out : undefined;
+}
 
 /* ---------- Angenommener Preisvorschlag ---------- */
 // eBay zeigt auf der Detailseite den gezahlten Betrag und daneben den durchgestrichenen Angebotspreis. Apify liefert
@@ -942,6 +972,7 @@ function parseSale(row, detail = null) {
     multi: MULTI_TITLE_RX.test(norm(title)) || new Set([...norm(title).matchAll(/\b(\d{1,3})\s*\/\s*\d{2,3}\b/g)].map((m) => Number(m[1]))).size > 1,
     stage, stageSource, language, edition, variant, reprint, finish, pattern, conflicts,
     image: pickImage(row, detail),
+    images: pickImages(row, detail),
     country, location: locText || null, vatIncluded,
   };
 }
@@ -1395,7 +1426,7 @@ function manualSaleRow(card, entry, detail, now = Date.now()) {
     const row = fresh || {
       card_id: card.id, item_id: String(entry.id), sold_at: date, price_eur: typed,
       title: (detail && detail.title) || `eBay-Artikel ${entry.id}`, url: `https://www.ebay.de/itm/${entry.id}`,
-      parsed: { manual: true, graded, image: (detail && pickImage(detail, detail)) || null, raw: {},
+      parsed: { manual: true, graded, image: (detail && pickImage(detail, detail)) || null, images: detail ? pickImages(null, detail) : undefined, raw: {},
         ...(graded ? { gradeKey: gradeKey(card.grader, card.grade, card.grade_label), gradeUncertain: false } : { stage: entry.stage, stageSource: "manual" }) },
     };
     row.parsed = { ...row.parsed, manualPrice: typed };
@@ -1461,7 +1492,7 @@ function saleFromDb(r) {
 // Suchzeile einer gespeicherten Zeile rekonstruieren (für nachträgliche Detailseiten)
 function rowFromDb(r) {
   const raw = (r.parsed && r.parsed.raw) || {};
-  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted, image: (r.parsed && r.parsed.image) || null,
+  return { itemId: r.item_id, title: r.title, url: r.url, priceValue: Number(r.price_eur), currency: "EUR", soldAt: r.sold_at, condition: raw.condition, buyingFormat: raw.buyingFormat, priceIsAskingPrice: raw.priceIsAskingPrice, bestOfferAccepted: raw.bestOfferAccepted, image: (r.parsed && r.parsed.image) || null, images: (r.parsed && r.parsed.images) || undefined,
     itemLocation: (r.parsed && r.parsed.location) || undefined, countryKnown: r.parsed && "country" in r.parsed ? r.parsed.country : null,
     vatIncludedKnown: r.parsed && typeof r.parsed.vatIncluded === "boolean" ? r.parsed.vatIncluded : null };
 }
@@ -1575,16 +1606,20 @@ window.imgFallback = img => {
   img.style.visibility = "hidden";
 };
 
-const condOptions = sel =>
+// Zustand mit Abstufung: je eBay-Stufe eine Gruppe mit "+", ohne Zusatz und "−"
+const condOptions = (sel, fine = null) =>
   (sel && !COND_CODES.includes(sel) ? `<option value="${esc(sel)}" selected>${esc(sel)} (alte Skala)</option>` : "") +
-  CONDITIONS.map(([v, l]) => `<option value="${v}"${v === sel ? " selected" : ""}>${l} (${v})</option>`).join("");
+  CONDITIONS.map(([v, l]) => `<optgroup label="${esc(l)}">${["+", null, "-"].map(f => {
+    const val = v + (f || ""), on = v === sel && (fine || null) === f;
+    return `<option value="${val}"${on ? " selected" : ""}>${v}${f ? FINE_SIGN[f] : ""}${f === "+" ? " · oberes Ende" : f === "-" ? " · unteres Ende" : ""}</option>`;
+  }).join("")}</optgroup>`).join("");
 const finishOptions = sel => FINISHES.map(([v, l]) => `<option value="${v}"${v === sel ? " selected" : ""}>${l}</option>`).join("");
 
 /* ---------- Grading ---------- */
 const isGraded = c => Boolean(c && c.grader && c.grade != null);
 const gradeText = c => (isGraded(c) ? EBAY.gradeKey(c.grader, c.grade, c.grade_label) : "");
 // Zustandsmarke einer Karte: bei gegradeten Karten Prüfdienst und Note
-const condTag = c => (isGraded(c) ? `<span class="tag graded">${esc(gradeText(c))}</span>` : `<span class="tag">${esc(c.condition)}</span>`);
+const condTag = c => (isGraded(c) ? `<span class="tag graded">${esc(gradeText(c))}</span>` : `<span class="tag">${esc(condLabel(c))}</span>`);
 const GRADE_STEPS = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"];
 const GRADE_LABELS = [["", "ohne Zusatz"], ["pristine", "Pristine"], ["black", "Black Label"], ["perfect", "Perfect"]];
 // Link zur Zertifikatsprüfung beim Prüfdienst (nur wo die Adresse bekannt ist)
@@ -2132,7 +2167,7 @@ function exportCsv() {
     const c = r.c, e = r.e;
     const k = costOf(c);
     return [
-      txt(c.name), txt(c.set_name), txt(c.set_name ? setYear(c.set_name) : ""), txt(c.card_number), txt(c.language), txt(isGraded(c) ? "" : c.condition),
+      txt(c.name), txt(c.set_name), txt(c.set_name ? setYear(c.set_name) : ""), txt(c.card_number), txt(c.language), txt(isGraded(c) ? "" : condLabel(c)),
       txt(gradeText(c)), txt(isGraded(c) ? c.cert_number || "" : ""), txt((FIN_TEXT[finishOf(c)] || "") + (patternOf(c) ? " " + PATTERN_LABEL[patternOf(c)] : "")), c.first_edition ? "ja" : "nein", c.quantity,
       num(k ? k.price : null), num(k && k.extra ? k.extra : null), num(r.unit), num(r.total),
       num(k && r.unit ? (k.price - r.unit) / r.unit * 100 : null), num(k && r.unit != null ? (r.unit - k.total) * c.quantity : null),
@@ -3056,19 +3091,60 @@ function closeSheet() {
 
 /* Bild groß innerhalb der App (Leuchtkasten). Ein Tipp daneben, aufs Bild, auf ✕ oder Escape schließt ihn,
    die App bleibt im Hintergrund sichtbar. Erst das schon geladene kleine Bild zeigen, dann das große nachladen. */
-function openLightbox(big, small, alt) {
+// gallery: Liste großer Bilder zum Blättern (Pfeile, Wischen, Pfeiltasten, Tipp aufs Bild = weiter); start: Startbild
+let lbStep = null;
+// link: eBay-Seite des Angebots (bei Verkäufen ohne gespeicherte Fotoliste: dort alle Fotos)
+function openLightbox(big, small, alt, gallery, start = 0, link = null) {
   closeLightbox();
+  const list = Array.isArray(gallery) && gallery.length > 1 ? gallery : null;
   const el = document.createElement("div");
-  el.className = "lightbox";
+  el.className = "lightbox" + (list ? " lbgal" : "");
   el.id = "lightbox";
   el.setAttribute("role", "dialog");
   el.setAttribute("aria-modal", "true");
   el.setAttribute("aria-label", alt || "Bild");
-  el.innerHTML = `<img alt="${esc(alt || "")}"><button class="lbclose" aria-label="Schließen">✕</button>`;
+  el.innerHTML = `<img alt="${esc(alt || "")}"><button class="lbclose" aria-label="Schließen">✕</button>` + (list ? `
+    <button class="lbnav lbprev" aria-label="Vorheriges Foto">‹</button><button class="lbnav lbnext" aria-label="Nächstes Foto">›</button>
+    <span class="lbcount" aria-live="polite"></span>` : link ? `<a class="lblink" href="${esc(link)}" target="_blank" rel="noopener">Alle Fotos bei eBay ↗</a>` : "");
   const img = el.querySelector("img");
-  img.src = small || big;
-  if (big && big !== small) { const pre = new Image(); pre.onload = () => { if (img.isConnected) img.src = big; }; pre.src = big; }
-  el.addEventListener("click", e => { e.stopPropagation(); closeLightbox(); });
+  // erst das vorhandene Bild zeigen, dann das große nachladen
+  const show = (src, placeholder) => {
+    if (placeholder) img.src = placeholder;
+    if (src && src !== placeholder) { const pre = new Image(); pre.onload = () => { if (img.isConnected && img.dataset.want === src) img.src = src; }; pre.src = src; }
+    img.dataset.want = src || "";
+    if (!placeholder) img.src = src;
+  };
+  if (!list) {
+    show(big, small || null);
+    lbStep = null;
+    el.addEventListener("click", e => { e.stopPropagation(); if (!e.target.closest(".lblink")) closeLightbox(); });
+  } else {
+    let i = Math.min(Math.max(0, start), list.length - 1);
+    const count = el.querySelector(".lbcount");
+    const go = (n, first) => {
+      i = (n + list.length) % list.length;
+      show(list[i], first ? small || null : null);
+      count.textContent = `${i + 1} / ${list.length}`;
+      [list[(i + 1) % list.length], list[(i - 1 + list.length) % list.length]].forEach(u => { new Image().src = u; }); // Nachbarn vorladen
+    };
+    lbStep = d => go(i + d);
+    go(i, true);
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      if (e.target.closest(".lbprev")) return go(i - 1);
+      if (e.target.closest(".lbnext") || e.target === img) return go(i + 1);
+      closeLightbox();
+    });
+    // Wischen am Handy
+    let x0 = null, y0 = 0;
+    el.addEventListener("touchstart", e => { if (e.touches.length === 1) { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; } }, { passive: true });
+    el.addEventListener("touchend", e => {
+      if (x0 == null) return;
+      const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+      x0 = null;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.3) { e.preventDefault(); go(i + (dx < 0 ? 1 : -1)); }
+    });
+  }
   document.body.appendChild(el);
   document.body.classList.add("lock");
   el.querySelector(".lbclose").focus({ preventScroll: true });
@@ -3077,6 +3153,7 @@ function closeLightbox() {
   const el = $("#lightbox");
   if (!el) return false;
   el.remove();
+  lbStep = null;
   if (!$("#sheet")) document.body.classList.remove("lock");
   return true;
 }
@@ -3085,7 +3162,16 @@ function closeLightbox() {
 document.addEventListener("click", e => {
   if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest("a.simg");
-  if (a) { e.preventDefault(); const im = a.querySelector("img"); openLightbox(a.href, im && im.currentSrc, "Angebotsfoto"); return; }
+  if (a) {
+    e.preventDefault();
+    const im = a.querySelector("img");
+    const gal = a.dataset.gal ? a.dataset.gal.split(" ") : null;
+    const key = u => String(u).replace(/\/s-l\d+\.\w+$/, "");
+    const at = gal ? Math.max(0, gal.findIndex(u => key(u) === key(a.href))) : 0;
+    const page = !gal && a.closest(".sale") && a.closest(".sale").querySelector("a.stl[href^='https://']");
+    openLightbox(a.href, im && im.currentSrc, "Angebotsfoto", gal, at, page ? page.href : null);
+    return;
+  }
   const art = e.target.closest(".dart img");
   if (art) { e.preventDefault(); openLightbox(art.currentSrc || art.src, null, art.alt); }
 });
@@ -3545,7 +3631,7 @@ function openAdd(mode) {
           <p class="muted">${esc(c.rarity || "")}</p>
         </div>
       </div>
-      ${owned.length ? `<div class="cowned"><b>In deiner Sammlung</b>${owned.map(r => `<button class="linkish" data-open="${esc(r.c.id)}">${esc(gradeText(r.c) || r.c.condition)}${finishOf(r.c) !== "non_holo" ? " · " + esc(FIN_LABEL[finishOf(r.c)] || "") : ""}: ${r.unit != null ? `${eur(r.unit)}${r.counted ? "" : " (vorläufig)"}` : "noch kein Wert"} · Verkäufe ansehen</button>`).join("")}</div>` : ""}
+      ${owned.length ? `<div class="cowned"><b>In deiner Sammlung</b>${owned.map(r => `<button class="linkish" data-open="${esc(r.c.id)}">${esc(gradeText(r.c) || condLabel(r.c))}${finishOf(r.c) !== "non_holo" ? " · " + esc(FIN_LABEL[finishOf(r.c)] || "") : ""}: ${r.unit != null ? `${eur(r.unit)}${r.counted ? "" : " (vorläufig)"}` : "noch kein Wert"} · Verkäufe ansehen</button>`).join("")}</div>` : ""}
       ${jp ? `<label>Name für die eBay-Suche (englisch)<input id="enname" type="text" value="${esc(name)}" placeholder="z. B. Charizard" autocomplete="off"></label>` : ""}
       <div class="crow">
         <label>Ausführung<select id="finish">${finishOptions(o.defFinish)}</select></label>
@@ -3682,7 +3768,7 @@ function openAdd(mode) {
       set_name: jp && !c.manual ? jpSetLabel(sid, c.set && c.set.name) : ((c.set && c.set.name) || null),
       card_number: noNum ? null : String(c.localId),
       language: s.lang,
-      condition: $("#cond", sheet).value,
+      condition: splitCond($("#cond", sheet).value).condition,
       quantity: Math.max(1, parseInt($("#qty", sheet).value, 10) || 1),
       purchase_price_eur: pp === "" ? null : Number(pp),
       ...extraCostPatch(sheet, null),
@@ -3692,6 +3778,8 @@ function openAdd(mode) {
       finish: $("#finish", sheet).value
     };
     if ($("#first", sheet).checked) row.first_edition = true;
+    const fineNew = splitCond($("#cond", sheet).value).fine;
+    if (fineNew && !gr.grader) row.condition_fine = fineNew; // Spalte nur senden, wenn genutzt (klappt auch vor dem SQL-Update)
     if (gr.grader) Object.assign(row, gr, { condition: "NM" }); // Zustand gilt bei gegradeten Karten nicht
     const pat = readPattern(sheet);
     // Zusatzangaben für den eBay-Abgleich, nur wenn update5.sql schon gelaufen ist
@@ -3713,6 +3801,7 @@ function openAdd(mode) {
     if (error) {
       $("#saveerr", sheet).textContent = /first_edition/.test(error.message)
         ? "Bitte zuerst update3.sql in Supabase ausführen, dann erneut speichern."
+        : /condition_fine/.test(error.message) ? FINE_MSG
         : /finish|condition/.test(error.message) ? UPDATE4_MSG
         : /set_total|tcg_meta/.test(error.message) ? UPDATE5_MSG
         : /language/.test(error.message) ? JP_UPDATE_MSG
@@ -3791,10 +3880,14 @@ function ebayImg(src, size) {
   if (typeof src !== "string" || !/^https:\/\/i\.ebayimg\.com\/[^\s"'<>]+$/.test(src)) return null;
   return /\/s-l\d+\.(jpg|jpeg|png|webp)$/i.test(src) ? src.replace(/\/s-l\d+\.(jpg|jpeg|png|webp)$/i, `/s-l${size}.$1`) : src;
 }
-function saleImgHtml(src) {
+// imgs: alle Fotos des Angebots (nur bei Verkäufen mit gelesener Detailseite), sonst nur das Vorschaubild
+function saleImgHtml(src, imgs) {
+  const gal = (Array.isArray(imgs) ? imgs : []).map(u => ebayImg(u, 1600)).filter(Boolean);
+  if (!src && gal.length) src = gal[0];
   const small = ebayImg(src, 225), big = ebayImg(src, 1600);
   if (!small) return "";
-  return `<a class="simg" href="${esc(big)}" target="_blank" rel="noopener" title="Angebotsfoto groß öffnen"><img src="${esc(small)}" alt="Angebotsfoto" loading="lazy" onerror="this.parentNode.style.visibility='hidden'"></a>`;
+  const multi = gal.length > 1;
+  return `<a class="simg" href="${esc(big)}" target="_blank" rel="noopener" title="${multi ? `${gal.length} Angebotsfotos ansehen` : "Angebotsfoto groß öffnen"}"${multi ? ` data-gal="${esc(gal.join(" "))}"` : ""}><img src="${esc(small)}" alt="Angebotsfoto" loading="lazy" onerror="this.parentNode.style.visibility='hidden'">${multi ? `<span class="simgn" aria-hidden="true">${gal.length}</span>` : ""}</a>`;
 }
 
 const COUNTRY_LABEL = { US: "USA", GB: "UK", JP: "Japan", CA: "Kanada", AU: "Australien", HK: "Hongkong", CN: "China",
@@ -3924,7 +4017,7 @@ async function openDetail(id) {
       <h3>Bearbeiten</h3>
       <div class="dform">
         ${gradeFieldsHtml(c)}
-        <label class="fcond">Zustand<select id="cond">${condOptions(c.condition)}</select></label>
+        <label class="fcond">Zustand<select id="cond">${condOptions(c.condition, fineOf(c))}</select></label>
         <label class="ffin">Ausführung<select id="finish">${finishOptions(finishOf(c))}</select></label>
         ${patternFieldHtml(patternOf(c), c.tcg_meta && c.tcg_meta.patterns, "fwide")}
         <label>Menge<input id="qty" type="number" min="1" value="${c.quantity}" inputmode="numeric"></label>
@@ -3981,7 +4074,7 @@ async function openDetail(id) {
       <div class="nact"><button type="button" class="ghost" data-ncancel>Abbrechen</button><button type="button" class="primary" data-nsave="${s._id}">Speichern</button></div>
     </div>`;
   const saleLi = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}${s._nc ? " n-" + s._nc : ""}">
-      ${saleImgHtml(s.image)}
+      ${saleImgHtml(s.image, s.images)}
       <span class="sd">${shortDate(s.soldAt)}</span>
       <span class="st">${saleTags(s, canSetStage && !isGraded(c))}</span>
       <span class="sp">${salePriceHtml(s)}</span>
@@ -3991,7 +4084,7 @@ async function openDetail(id) {
     </li>`;
 
   const saleLiPlain = s => `<li class="sale${ebayImg(s.image, 225) ? " hasimg" : ""}">
-      ${saleImgHtml(s.image)}
+      ${saleImgHtml(s.image, s.images)}
       <span class="sd">${shortDate(s.soldAt)}</span>
       <span class="st">${saleTags(s, canSetStage && !isGraded(c))}</span>
       <span class="sp">${salePriceHtml(s)}</span>
@@ -4051,7 +4144,7 @@ async function openDetail(id) {
         <p class="muted dsmall">Nach Grund gruppiert. Verkäufe in anderen Zuständen stehen oben in der Tabelle.</p>
         ${groupHtml}</details>` : ""}
       ${userEx.length ? `<p class="dsmall">Von dir ausgeschlossen:</p><ul class="sales">${userEx.map(r => { const im = r.parsed && r.parsed.image; return `<li class="sale${ebayImg(im, 225) ? " hasimg" : ""}">
-        ${saleImgHtml(im)}
+        ${saleImgHtml(im, r.parsed && r.parsed.images)}
         <span class="sd">${shortDate(r.sold_at)}</span><span class="st"></span><span class="sp">${eur(Number(r.price_eur))}</span>
         <a class="stl" href="${esc(ebayItemUrl(r.item_id, r.url))}" target="_blank" rel="noopener" title="${esc(r.title)}">${esc(r.title)}</a>
         <button class="ghost sx" data-in="${r.id}">Wieder einbeziehen</button></li>`; }).join("")}</ul>` : ""}
@@ -4164,7 +4257,7 @@ async function openDetail(id) {
     }
     const head = res.tier === "none"
       ? (graded ? "Für deine Note gibt es keinen passenden Verkauf." : "Für deinen Zustand gibt es keinen passenden Verkauf.")
-      : `${origin ? `Nur ${originName(origin === "EU" ? "EU" : origin === "NONEU" ? "außerhalb der EU" : origin === "UNK" ? "unbekannte Herkunft" : origin)}: Median` : "Dein Wert: Median"} aus ${res.headline.n} ${res.headline.n === 1 ? "Verkauf" : "Verkäufen"} (${res.headline.basis})${res.tier === "strict" ? ", alle Merkmale belegt." : ", teils mit Annahmen: Eine unbekannte Sprache oder Ausführung gilt als passend."}`;
+      : `${origin ? `Nur ${originName(origin === "EU" ? "EU" : origin === "NONEU" ? "außerhalb der EU" : origin === "UNK" ? "unbekannte Herkunft" : origin)}: Median` : "Dein Wert: Median"} aus ${res.headline.n} ${res.headline.n === 1 ? "Verkauf" : "Verkäufen"} (${res.headline.basis})${res.tier === "strict" ? ", alle Merkmale belegt." : ", teils mit Annahmen: Eine unbekannte Sprache oder Ausführung gilt als passend."}${fineOf(c) ? ` Deine Abstufung ${esc(condLabel(c))} fließt nicht ein: Der Wert gilt für ${esc(c.condition)} insgesamt.` : ""}`;
     const lines = keys.map(st => {
       const own = st === ownKey;
       const r = own ? res : compute(graded ? { ...c, ...keyCard[st] } : { ...c, condition: st }, true);
@@ -4183,7 +4276,7 @@ async function openDetail(id) {
       const n = h ? `${h.n} ${h.n === 1 ? "Verkauf" : "Verkäufe"}, ${h.basis}${h.n >= 3 ? "" : ", vorläufig"}${markTxt ? `<br><span class="nmark">davon ${markTxt}</span>` : ""}` : "kein Verkauf";
       const label = `<span class="chev" aria-hidden="true">${can ? (isOpen ? "▾" : "▸") : ""}</span>${st}`;
       const row = `<tr class="${[own ? "own" : "", can ? "can" : ""].join(" ").trim()}"${can ? ` data-stage="${st}"` : ""}>
-        <th scope="row">${can ? `<button class="cbtn" data-stage="${st}" aria-expanded="${isOpen}">${label}</button>` : label}${own ? ` <span class="tag own-mark">deine Karte</span>` : ""}<small>${graded ? esc((EBAY.GRADERS.find(g => g.code === keyCard[st].grader) || { label: keyCard[st].grader }).label) : STAGE_NAMES[st]}</small></th>
+        <th scope="row">${can ? `<button class="cbtn" data-stage="${st}" aria-expanded="${isOpen}">${label}</button>` : label}${own ? ` <span class="tag own-mark">deine Karte${fineOf(c) ? " · " + esc(condLabel(c)) : ""}</span>` : ""}<small>${graded ? esc((EBAY.GRADERS.find(g => g.code === keyCard[st].grader) || { label: keyCard[st].grader }).label) : STAGE_NAMES[st]}</small></th>
         <td class="num price">${price}</td>
         <td class="num"><small>${n}</small></td></tr>`;
       const exp = isOpen ? `<tr class="exp" data-for="${st}"><td colspan="3">
@@ -4337,12 +4430,14 @@ async function openDetail(id) {
   wireCostFields(sheet);
   $("#upd", sheet).onclick = async () => {
     const ppv = $("#pp", sheet).value;
+    const cs = splitCond($("#cond", sheet).value);
     const patch = {
-      condition: $("#cond", sheet).value,
+      condition: cs.condition,
       quantity: Math.max(1, parseInt($("#qty", sheet).value, 10) || 1),
       purchase_price_eur: ppv === "" ? null : Number(ppv)
     };
     Object.assign(patch, extraCostPatch(sheet, c));
+    if ((cs.fine || null) !== (c.condition_fine || null) && (cs.fine || "condition_fine" in c)) patch.condition_fine = cs.fine;
     // Spalten nur senden, wenn sich der Wert ändert: so funktioniert Speichern auch vor den SQL-Updates
     const fe = $("#first", sheet).checked;
     if (fe !== Boolean(c.first_edition)) patch.first_edition = fe;
@@ -4392,6 +4487,7 @@ async function openDetail(id) {
     if (error) {
       $("#derr", sheet).textContent = /first_edition/.test(error.message)
         ? "Bitte zuerst update3.sql in Supabase ausführen, dann erneut speichern."
+        : /condition_fine/.test(error.message) ? FINE_MSG
         : /finish|condition/.test(error.message) ? UPDATE4_MSG
         : /ebay_query/.test(error.message) ? UPDATE5_MSG
         : /grade|grader|cert_number/.test(error.message) ? GRADE_UPDATE_MSG
@@ -4439,6 +4535,7 @@ async function openDetail(id) {
 
 document.addEventListener("click", e => { if (!e.target.closest(".menuwrap")) closeMenu(false); });
 document.addEventListener("keydown", e => {
+  if (lbStep && (e.key === "ArrowRight" || e.key === "ArrowLeft")) { e.preventDefault(); lbStep(e.key === "ArrowRight" ? 1 : -1); return; }
   if (e.key !== "Escape") return;
   if (closeLightbox()) return;
   if (closeMenu(true)) return;
