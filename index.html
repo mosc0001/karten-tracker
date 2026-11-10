@@ -3352,8 +3352,10 @@ function openAdd(mode) {
     }
   }
 
-  async function search() {
-    const raw = $("#q", sheet).value.trim();
+  // override: Ersatzsuche ohne das Eingabefeld zu ändern (z. B. Name + Nummer, wenn die Setgröße nicht passt); note: Hinweis über den Treffern
+  async function search(override, note) {
+    const raw = typeof override === "string" ? override : $("#q", sheet).value.trim();
+    if (typeof override !== "string") note = null;
     s.enHint = null;
     if (isJP()) {
       if (raw.length < 2) return;
@@ -3375,10 +3377,13 @@ function openAdd(mode) {
         setsFor(lang()).catch(() => []),
         lang() === "en" ? Promise.resolve(null) : setsFor("en").catch(() => [])
       ]);
+      let numHit = false;
       if (numQ) {
         const hit = list.filter(c => numKey(c.localId) === numKey(numQ));
-        if (hit.length) list = hit;
+        // Ersatzsuche (Setgröße passte nicht): Treffer mit der Nummer zuerst, darunter die übrigen Karten mit dem Namen
+        if (hit.length) { list = note ? [...hit, ...list.filter(c => !hit.includes(c))] : hit; numHit = true; }
       }
+      if (note) note += numHit ? (list.length > 1 ? ` Oben die Karte mit Nr. ${numQ}, darunter alle weiteren „${nameQ}“.` : ` Treffer mit Nr. ${numQ}:`) : ` Hier alle Karten „${nameQ}“:`;
       let setHits = numQ ? [] : matchSets(sets, enSets, raw);
       if (!list.length) {
         const combo = await nameInSet(nameQ, sets, enSets);
@@ -3389,15 +3394,16 @@ function openAdd(mode) {
       }
       if (!list.length && setHits.length === 1) return openSet(setHits[0].id, setHits[0]);
       if (!list.length && !setHits.length) {
-        res.innerHTML = `<p class="muted">Keine Treffer. Probiere einen kürzeren Namen, den Setnamen, die Kartennummer (z. B. 6/105) oder die andere Sprache.</p>`;
+        res.innerHTML = `<p class="muted">${note ? esc(note.split(" Hier")[0]) + " " : ""}Keine Treffer. Probiere einen kürzeren Namen, den Setnamen, die Kartennummer (z. B. 6/105) oder die andere Sprache.</p>`;
         return;
       }
       const byId = new Map(sets.map(x => [x.id, x.name]));
       // neueste Sets zuerst (Reihenfolge der TCGdex-Setliste), Sondersets wie Galarian Gallery beim Hauptset
       const order = new Map(sets.map((x, i) => [x.id, i]));
-      list.sort((a, b) => (order.get(setIdFromCardId(b.id, b.localId)) ?? -1) - (order.get(setIdFromCardId(a.id, a.localId)) ?? -1));
+      const top = note && numHit ? c => numKey(c.localId) === numKey(numQ) ? 1 : 0 : () => 0;
+      list.sort((a, b) => top(b) - top(a) || (order.get(setIdFromCardId(b.id, b.localId)) ?? -1) - (order.get(setIdFromCardId(a.id, a.localId)) ?? -1));
       showResults(list.slice(0, 120).map(c => ({ ...c, setName: byId.get(setIdFromCardId(c.id, c.localId)) })),
-        list.length > 120 ? `${list.length} Karten gefunden, die neuesten 120. Mit Nummer geht es schneller, z. B. „${nameQ} GG05“ oder „GG05/GG70“.` : "", setHits);
+        [note, list.length > 120 ? `${list.length} Karten gefunden, die neuesten 120. Mit Nummer geht es schneller, z. B. „${nameQ} GG05“ oder „GG05/GG70“.` : ""].filter(Boolean).join(" "), setHits);
     } catch (e) {
       res.innerHTML = `<p class="err">Suche fehlgeschlagen: ${esc(e.message)}</p>`;
     }
@@ -3452,9 +3458,8 @@ function openAdd(mode) {
       const nf = norm(nameFilter);
       const list = found ? (nf ? found.filter(c => norm(c.name).includes(nf)) : found) : [];
       if (!list.length && nameFilter && !isJP()) {
-        // z. B. Tippfehler bei der Setgröße: über Name und Nummer weitersuchen
-        $("#q", sheet).value = `${nameFilter} ${localNum}`;
-        return search();
+        // z. B. Tippfehler bei der Setgröße: über Name und Nummer weitersuchen, deine Eingabe bleibt stehen
+        return search(`${nameFilter} ${localNum}`, `Keine Karte „${nameFilter}“ Nr. ${localNum}/${official} gefunden.`);
       }
       if (!found) {
         res.innerHTML = `<p class="muted">Kein Set mit ${official} Karten gefunden. Prüfe die Nummer oder die Sprache, oder suche mit Name und Nummer, z. B. „Lapras ${esc(localNum)}“.</p>`;
