@@ -1611,7 +1611,7 @@ const condOptions = (sel, fine = null) =>
   (sel && !COND_CODES.includes(sel) ? `<option value="${esc(sel)}" selected>${esc(sel)} (alte Skala)</option>` : "") +
   CONDITIONS.map(([v, l]) => `<optgroup label="${esc(l)}">${["+", null, "-"].map(f => {
     const val = v + (f || ""), on = v === sel && (fine || null) === f;
-    return `<option value="${val}"${on ? " selected" : ""}>${v}${f ? FINE_SIGN[f] : ""}${f === "+" ? " · oberes Ende" : f === "-" ? " · unteres Ende" : ""}</option>`;
+    return `<option value="${val}"${on ? " selected" : ""}>${v}${f ? FINE_SIGN[f] : ""}</option>`;
   }).join("")}</optgroup>`).join("");
 const finishOptions = sel => FINISHES.map(([v, l]) => `<option value="${v}"${v === sel ? " selected" : ""}>${l}</option>`).join("");
 
