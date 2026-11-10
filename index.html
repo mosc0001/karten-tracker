@@ -224,6 +224,7 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
 .gainpct.up{color:var(--up);background:color-mix(in srgb,var(--up) 15%,transparent)}
 .gainpct.down{color:var(--down);background:color-mix(in srgb,var(--down) 14%,transparent)}
 .gainpct.prov{opacity:.65}
+.pqty{color:var(--muted);font-weight:500;font-size:12px;margin-left:4px}
 .gline{display:block;margin:2px 0 1px}
 .gline .gainpct{margin-left:0}
 /* Am Rechner: Spalten wie in einer Mac-Liste (Karte | Merkmale | Wert) */
@@ -2535,8 +2536,10 @@ function tileHtml(r) {
 // Poster für die Regale (wie in der Apple-TV-App)
 function posterHtml(r) {
   const c = r.c;
-  const val = r.unit == null ? "" : (r.counted ? `<b>${eur(r.total)}</b>` : `${eur(r.total)}, vorläufig`) + gainBadge(r);
-  return `<li><button class="poster" data-id="${esc(c.id)}" aria-label="${esc(c.name)}${r.unit != null ? ", " + eur(r.total) : ""}">
+  // Regale zeigen den Wert pro Karte; bei mehreren Exemplaren steht die Menge dabei
+  const qty = c.quantity > 1 ? ` <span class="pqty">${c.quantity}×</span>` : "";
+  const val = r.unit == null ? "" : (r.counted ? `<b>${eur(r.unit)}</b>` : `${eur(r.unit)}, vorläufig`) + qty + gainBadge(r);
+  return `<li><button class="poster" data-id="${esc(c.id)}" aria-label="${esc(c.name)}${r.unit != null ? ", " + eur(r.unit) + " pro Karte" + (c.quantity > 1 ? `, ${c.quantity} Exemplare` : "") : ""}">
     <span class="art">${c.image_url
       ? `<img src="${esc(c.image_url)}" alt="" loading="lazy" data-tid="${esc(c.tcgdex_id || "")}" onerror="imgFallback(this)">`
       : `<span class="noart">${esc(c.name)}</span>`}</span>
@@ -2547,7 +2550,7 @@ function posterHtml(r) {
 
 function shelvesHtml(all, withProv) {
   if (all.length < 6) return "";
-  const top = all.filter(r => r.counted || (withProv && r.unit != null)).sort((a, b) => b.total - a.total).slice(0, 15);
+  const top = all.filter(r => r.counted || (withProv && r.unit != null)).sort((a, b) => b.unit - a.unit).slice(0, 15);
   const recent = [...all].sort((a, b) => String(b.c.created_at).localeCompare(String(a.c.created_at))).slice(0, 15);
   const shelf = (title, rows, sort) => rows.length < 3 ? "" : `<section class="shelf" aria-label="${esc(title)}">
       <div class="shelf-head">
@@ -2565,7 +2568,7 @@ function shelvesHtml(all, withProv) {
 
 // Bild der wertvollsten Karte für den Kopfbereich
 function heroArt(all) {
-  const r = all.filter(x => x.counted && x.c.image_url).sort((a, b) => b.total - a.total)[0]
+  const r = all.filter(x => x.counted && x.c.image_url).sort((a, b) => b.unit - a.unit)[0]
     || all.find(x => x.c.image_url);
   if (!r) return null;
   return { c: r.c, big: r.c.image_url.replace(/\/low\.(webp|png|jpg)$/, "/high.$1") };
@@ -2974,7 +2977,7 @@ function renderList() {
   renderFilterBar(all);
   const rows = all.filter(r => rowMatches(r, f, null, tokens, years));
   const sorters = {
-    value: (a, b) => (b.total ?? -1) - (a.total ?? -1),
+    value: (a, b) => (b.unit ?? -1) - (a.unit ?? -1) || (b.total ?? -1) - (a.total ?? -1), // Wert pro Karte, wie im Regal
     name: (a, b) => a.c.name.localeCompare(b.c.name, "de"),
     newest: (a, b) => String(b.c.created_at).localeCompare(String(a.c.created_at))
   };
