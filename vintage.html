@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vintage">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Vintage-Fundamentaldaten</title>
+<style>
+/* Gestaltung wie Karten-Tracker und Snipe-Scout */
+:root{
+  color-scheme:light dark;
+  --bg:#F2F2F7;--surface:#FFFFFF;--fill:rgba(118,118,128,.12);--fill2:rgba(118,118,128,.2);
+  --ink:#000000;--muted:rgba(60,60,67,.6);--faint:rgba(60,60,67,.3);--line:rgba(60,60,67,.18);
+  --accent:#007AFF;--tint:rgba(0,122,255,.12);--danger:#FF3B30;
+  --glass:rgba(249,249,249,.78);--shadow:0 10px 30px rgba(0,0,0,.12);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","Segoe UI",Roboto,system-ui,sans-serif;
+  /* Diagramm: Kategorien in fester Reihenfolge (Referenzpalette), Rest grau */
+  --g10:#2a78d6;--g9:#eb6834;--g8:#1baf7a;--gx:#a3a29b;--grid:rgba(60,60,67,.12);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#000000;--surface:#1C1C1E;--fill:rgba(118,118,128,.24);--fill2:rgba(118,118,128,.36);
+  --ink:#FFFFFF;--muted:rgba(235,235,245,.6);--faint:rgba(235,235,245,.3);--line:rgba(84,84,88,.55);
+  --accent:#0A84FF;--tint:rgba(10,132,255,.2);--danger:#FF453A;
+  --glass:rgba(22,22,24,.72);--shadow:0 20px 50px rgba(0,0,0,.6);
+  --g10:#3987e5;--g9:#d95926;--g8:#199e70;--gx:#6f6e68;--grid:rgba(235,235,245,.12);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%;overflow-x:clip}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 var(--font);-webkit-font-smoothing:antialiased;
+  padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+body.lock{overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+h1,h2,h3{margin:0;line-height:1.15;letter-spacing:-.02em}
+a{color:var(--accent)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px 120px}
+.pad{padding:24px 20px}
+.muted{color:var(--muted)}
+.err{color:var(--danger)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 0 4px}
+.ltitle{font-size:34px;font-weight:700;margin:2px 0 4px}
+@media (min-width:760px){.ltitle{font-size:44px;margin:6px 0 6px}}
+.lead{color:var(--muted);font-size:15px;margin:0 0 18px;max-width:70ch}
+.ghost{background:var(--fill);border:0;border-radius:999px;padding:8px 14px;color:var(--ink);font-weight:500;text-decoration:none;font-size:15px}
+.ghost:hover{background:var(--fill2)}
+.primary{background:var(--accent);color:#fff;border:0;border-radius:999px;padding:11px 20px;font-weight:600;font-size:16px}
+.wide{display:block;width:100%;margin-top:14px}
+input,select{display:block;width:100%;font:inherit;font-size:16px;color:var(--ink);background:var(--fill);border:0;border-radius:10px;padding:11px 12px;margin-top:6px;-webkit-appearance:none;appearance:none}
+select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:16px;padding-right:34px}
+input:focus,select:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45%,transparent)}
+.login{max-width:380px;margin:16vh auto 0;padding:0 20px}
+.login h1{font-size:34px;font-weight:700;margin-bottom:22px}
+
+/* Datenstand */
+.stand{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted);margin:0 0 18px}
+.stand b{color:var(--ink);font-weight:600}
+.warnline{background:var(--tint);color:var(--ink);border-radius:12px;padding:10px 14px;font-size:14px;margin:0 0 18px}
+
+/* Set-Kacheln */
+.sets{--bleed:calc((100vw - 100%) / 2);list-style:none;margin:0 calc(-1 * var(--bleed)) 22px;padding:4px var(--bleed) 10px;display:flex;gap:12px;overflow-x:auto;scrollbar-width:none}
+.sets::-webkit-scrollbar{display:none}
+.sets li{flex:none}
+.settile{width:172px;text-align:left;background:var(--surface);border:0;border-radius:14px;padding:12px 14px;display:grid;gap:4px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.settile[aria-pressed="true"]{box-shadow:0 0 0 2px var(--accent)}
+.settile .sname{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.settile .sbig{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.settile .ssub{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* Filter */
+.filters{display:grid;gap:10px;margin:0 0 12px}
+.frow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fchip{flex:none;display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:0;border-radius:999px;background:var(--fill);color:var(--ink);font-size:14px;font-weight:500;white-space:nowrap}
+.fchip:hover{background:var(--fill2)}
+.fchip[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.fchip small{opacity:.7;font-size:12px;font-variant-numeric:tabular-nums}
+.fquick{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 0}
+.fquick::-webkit-scrollbar{display:none}
+.seg{display:inline-flex;padding:2px;background:var(--fill);border-radius:9px}
+.seg button{border:0;background:none;border-radius:7px;padding:6px 14px;font-size:14px;font-weight:500;color:var(--ink);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.18);font-weight:600}
+@media (prefers-color-scheme:dark){.seg button[aria-pressed="true"]{background:#636366}}
+.frow2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.frow2 select,.frow2 input{margin:0}
+.resultinfo{color:var(--muted);font-size:14px;margin:0 0 10px}
+
+/* Liste */
+.list{list-style:none;margin:0;padding:0;background:var(--surface);border-radius:14px;overflow:hidden}
+.list li+li{border-top:.5px solid var(--line)}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;width:100%;text-align:left;background:none;border:0;padding:11px 16px}
+.row:hover{background:var(--fill)}
+.name{font-weight:600;font-size:16px}
+.rset{display:block;color:var(--muted);font-size:13px;margin-top:1px}
+.meta{display:flex;flex-wrap:wrap;gap:5px;align-items:center;color:var(--muted);font-size:13px;margin-top:5px;font-variant-numeric:tabular-nums}
+.nums{display:block;color:var(--muted);font-size:13px;margin-top:4px;font-variant-numeric:tabular-nums}
+.nums b{color:var(--ink);font-weight:600}
+.tag{background:var(--fill);border-radius:5px;padding:1px 6px;font-size:12px;font-weight:500;color:var(--muted)}
+.tag.foil{background:linear-gradient(115deg,#7ad0ff55,#b69cff55,#ff9fcb55,#ffd97955);color:var(--ink)}
+.tag.first{background:var(--tint);color:var(--accent)}
+.price{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;font-size:16px}
+.price small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.empty{padding:40px 0;color:var(--muted);text-align:center}
+.more{display:block;margin:14px auto 0}
+.note{margin-top:28px;color:var(--muted);font-size:13px;max-width:78ch}
+
+/* Blatt */
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.sheet{position:relative;background:var(--surface);width:100%;max-width:860px;max-height:93vh;overflow:auto;border-radius:16px 16px 0 0;padding:22px 20px calc(26px + env(safe-area-inset-bottom));box-shadow:var(--shadow)}
+.sheet::before{content:"";position:absolute;top:7px;left:50%;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--faint)}
+@media (min-width:760px){.backdrop{align-items:center;padding:4vh 20px}.sheet{border-radius:22px;max-height:90vh;padding:26px 30px 30px}.sheet::before{display:none}}
+.sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px}
+.sheet-head h2{font-size:22px;font-weight:700}
+.sheet h3{font-size:17px;font-weight:700;margin:22px 0 8px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:14px 0 0}
+.kpi{background:var(--fill);border-radius:12px;padding:10px 12px}
+.kpi .kl{font-size:12px;color:var(--muted)}
+.kpi .kv{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .ks{font-size:12px;color:var(--muted)}
+table.t{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+table.t th{text-align:right;font-weight:600;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:.5px solid var(--line);white-space:nowrap}
+table.t td{text-align:right;padding:7px 8px;border-bottom:.5px solid var(--line);white-space:nowrap}
+table.t th:first-child,table.t td:first-child{text-align:left}
+table.t tr.hi td{font-weight:600}
+.tscroll{overflow-x:auto;margin:0 -4px}
+.sales td:nth-child(n+5){color:var(--muted)}
+.chart{position:relative;margin:4px 0 0}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted);margin:6px 0 0}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.tip{position:absolute;pointer-events:none;background:var(--glass);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:var(--shadow);border-radius:10px;padding:7px 10px;font-size:13px;white-space:nowrap;z-index:2;transform:translate(-50%,-110%)}
+.tip b{font-variant-numeric:tabular-nums}
+.links{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(() => {
+"use strict";
+
+// Dieselbe Supabase wie der Karten-Tracker – gleiche Anmeldung
+const SUPABASE_URL = "https://etybhxsxnovicwlsoiha.supabase.co";
+const SUPABASE_KEY = "sb_publishable_L4T61xqNhqn9QyOYW_IGPg_I70TkeeL";
+const ACTIONS = "https://github.com/mosc0001/snipe-scout/actions/workflows/vintage.yml";
+const PSA = "https://www.psacard.com";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = n => n == null ? "–" : new Intl.NumberFormat("de-DE").format(n);
+const usd = n => n == null ? "–" : new Intl.NumberFormat("de-DE", { style: "currency", currency: "USD", maximumFractionDigits: n >= 100 ? 0 : 2 }).format(n);
+const pct = n => n == null ? "–" : new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(n) + " %";
+const dateDE = d => d ? new Date(d + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–";
+const dateS = d => d ? new Date(d + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "–";
+const monthsAgo = d => d ? Math.max(0, Math.round((Date.now() - new Date(d + "T12:00:00")) / (30.44 * 86400000))) : null;
+
+const VARIANTS = ["Holo", "Shining", "Crystal", "Holo (H)", "Reverse Foil", "Reverse Foil (Crystal)", "Non-Holo"];
+const SORTS = {
+  nr: ["Nummer", (a, b) => setIdx(a.set_key) - setIdx(b.set_key) || (a.sort_order ?? 0) - (b.sort_order ?? 0)],
+  g10: ["PSA-10-Pop ↑", (a, b) => (a.g10 ?? 1e9) - (b.g10 ?? 1e9)],
+  total: ["Pop gesamt ↓", (a, b) => (b.total ?? 0) - (a.total ?? 0)],
+  gemlo: ["Gem-Rate ↑", (a, b) => (a.gem_rate ?? 1e9) - (b.gem_rate ?? 1e9)],
+  p10: ["PSA-10-Preis ↓", (a, b) => (b.last_10_usd ?? -1) - (a.last_10_usd ?? -1)],
+  sales: ["Verkäufe ↓", (a, b) => (b.sales_count ?? 0) - (a.sales_count ?? 0)],
+};
+const state = { sets: [], stats: [], runs: [], set: "", scope: "u", variants: new Set(), edition: "", q: "", sort: "nr", shown: 120 };
+try { Object.assign(state, JSON.parse(localStorage.getItem("vt_state") || "{}"), { shown: 120 }); state.variants = new Set(state.variants || []); } catch (e) { /* ohne Speicher */ }
+const save = () => { try { localStorage.setItem("vt_state", JSON.stringify({ set: state.set, scope: state.scope, variants: [...state.variants], edition: state.edition, sort: state.sort })); } catch (e) { /* ohne Speicher */ } };
+
+/* ---------- Anmeldung (wie im Tracker) ---------- */
+function renderLogin(msg = "") {
+  $("#app").innerHTML = `
+    <main class="login">
+      <h1>Vintage</h1>
+      <input id="em" type="email" placeholder="E-Mail" autocomplete="username">
+      <input id="pw" type="password" placeholder="Passwort" autocomplete="current-password" style="margin-top:10px">
+      <button id="go" class="primary wide">Anmelden</button>
+      <p class="err" id="err">${esc(msg)}</p>
+    </main>`;
+  const go = async () => {
+    $("#err").textContent = "";
+    const { error } = await db.auth.signInWithPassword({ email: $("#em").value.trim(), password: $("#pw").value });
+    if (error) $("#err").textContent = "Anmeldung fehlgeschlagen: " + error.message;
+  };
+  $("#go").onclick = go;
+  $("#pw").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+}
+
+/* ---------- Daten ---------- */
+async function fetchAll(table, cols, order) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    let q = db.from(table).select(cols).range(from, from + 999);
+    for (const o of order) q = q.order(o);
+    const { data, error } = await q;
+    if (error) throw error;
+    out.push(...data);
+    if (data.length < 1000) return out;
+  }
+}
+
+async function load() {
+  $("#app").innerHTML = `<p class="muted pad">Daten werden geladen …</p>`;
+  try {
+    const [sets, stats, runs] = await Promise.all([
+      fetchAll("vintage_sets", "*", ["sort_order"]),
+      fetchAll("vintage_card_stats", "*", ["set_key", "sort_order"]),
+      db.from("vintage_runs").select("*").order("at", { ascending: false }).limit(10).then(r => { if (r.error) throw r.error; return r.data; }),
+    ]);
+    Object.assign(state, { sets, stats, runs });
+    render();
+  } catch (e) {
+    const missing = /does not exist|schema cache|42P01|PGRST205/i.test((e.message || "") + " " + (e.code || ""));
+    $("#app").innerHTML = missing
+      ? `<main class="wrap"><h1 class="ltitle">Vintage</h1><p class="warnline">Die Tabellen fehlen noch. Bitte <b>vintage.sql</b> im Supabase SQL Editor ausführen und danach den Workflow <a href="${ACTIONS}" target="_blank" rel="noopener">vintage</a> starten.</p></main>`
+      : `<p class="err pad">Laden fehlgeschlagen: ${esc(e.message)}</p>`;
+  }
+}
+
+const setIdx = key => { const s = state.sets.find(x => x.set_key === key); return s ? s.sort_order : 99; };
+const setOf = key => state.sets.find(s => s.set_key === key) || { name: key, tcg_set: key };
+const setLabel = key => { const s = setOf(key); return s.tcg_set + (key.endsWith("-1st") ? " 1st Ed." : ""); };
+const tags = c => [
+  c.variant && c.variant !== "Non-Holo" ? `<span class="tag foil">${esc(c.variant)}</span>` : `<span class="tag">Non-Holo</span>`,
+  c.edition === "1st Edition" ? `<span class="tag first">1st Ed.</span>` : c.edition === "Unlimited" ? `<span class="tag">Unlimited</span>` : "",
+].join("");
+
+/* ---------- Übersicht ---------- */
+function filtered() {
+  const q = state.q.trim().toLowerCase();
+  let rows = state.stats.filter(c =>
+    (state.scope === "all" || c.in_universe) &&
+    (!state.set || setOf(c.set_key).tcg_set === state.set) &&
+    (!state.variants.size || state.variants.has(c.variant)) &&
+    (!state.edition || c.edition === state.edition) &&
+    (!q || (c.subject + " " + c.card_number).toLowerCase().includes(q)));
+  const cmp = SORTS[state.sort] && SORTS[state.sort][1];
+  if (cmp) rows = [...rows].sort(cmp);
+  return rows;
+}
+
+function setTiles() {
+  const by = new Map();
+  for (const c of state.stats) {
+    if (state.scope !== "all" && !c.in_universe) continue;
+    const k = setOf(c.set_key).tcg_set;
+    const t = by.get(k) || { n: 0, total: 0, g10: 0, sales: 0 };
+    t.n++; t.total += c.total || 0; t.g10 += c.g10 || 0; t.sales += c.sales_count || 0;
+    by.set(k, t);
+  }
+  const names = [...new Set(state.sets.map(s => s.tcg_set))];
+  const tile = (key, label, t) => `
+    <li><button class="settile" data-set="${esc(key)}" aria-pressed="${state.set === key}">
+      <span class="sname">${esc(label)}</span>
+      <span class="sbig">${num(t.total)}</span>
+      <span class="ssub">gegradet · ${num(t.n)} Specs</span>
+      <span class="ssub">PSA 10: ${num(t.g10)} (${pct(t.total ? 100 * t.g10 / t.total : null)})</span>
+      <span class="ssub">${num(t.sales)} Verkäufe erfasst</span>
+    </button></li>`;
+  const all = [...by.values()].reduce((a, t) => ({ n: a.n + t.n, total: a.total + t.total, g10: a.g10 + t.g10, sales: a.sales + t.sales }), { n: 0, total: 0, g10: 0, sales: 0 });
+  return `<ul class="sets">${tile("", "Alle Sets", all)}${names.filter(n => by.has(n)).map(n => tile(n, n, by.get(n))).join("")}</ul>`;
+}
+
+function render() {
+  const lastPop = state.stats.reduce((m, c) => c.snap_date > m ? c.snap_date : m, "");
+  const lastSale = state.stats.reduce((m, c) => c.last_sale && c.last_sale > m ? c.last_sale : m, "");
+  const run = state.runs[0];
+  const stale = lastSale && monthsAgo(lastSale) >= 2;
+  const rows = filtered();
+  const counts = {};
+  for (const c of state.stats) if ((state.scope === "all" || c.in_universe) && (!state.set || setOf(c.set_key).tcg_set === state.set)) counts[c.variant] = (counts[c.variant] || 0) + 1;
+  $("#app").innerHTML = `
+  <main class="wrap">
+    <div class="top"><span></span><a class="ghost" href="index.html">Zum Tracker</a></div>
+    <h1 class="ltitle">Vintage</h1>
+    <p class="lead">PSA-Population je Note und PSA-Verkäufe je Note für Neo Genesis, Discovery, Revelation, Destiny, Expedition, Aquapolis und Skyridge. Nur englische Karten.</p>
+    <p class="stand"><span>Pop-Stand <b>${dateDE(lastPop)}</b></span><span>Neuester Verkauf <b>${dateDE(lastSale)}</b></span>${run ? `<span>Letzter Lauf ${esc(new Date(run.at).toLocaleDateString("de-DE"))}</span>` : ""}<a href="${ACTIONS}" target="_blank" rel="noopener">Abruf starten</a></p>
+    ${stale || lastSale ? `<p class="warnline">Seit etwa November 2025 ergänzt PSA neue Verkäufe in den frei zugänglichen Daten nur noch vereinzelt. Verkäufe bis Oktober 2025 sind gut abgedeckt; danach fehlt der Großteil. Neuester erfasster Verkauf: ${dateDE(lastSale)}.</p>` : ""}
+    ${setTiles()}
+    <div class="filters">
+      <div class="frow">
+        <div class="seg" role="group" aria-label="Umfang">
+          <button data-scope="u" aria-pressed="${state.scope === "u"}">Universum</button>
+          <button data-scope="all" aria-pressed="${state.scope === "all"}">Alle englischen</button>
+        </div>
+        <div class="seg" role="group" aria-label="Edition">
+          <button data-ed="" aria-pressed="${!state.edition}">Alle</button>
+          <button data-ed="1st Edition" aria-pressed="${state.edition === "1st Edition"}">1st Ed.</button>
+          <button data-ed="Unlimited" aria-pressed="${state.edition === "Unlimited"}">Unlimited</button>
+        </div>
+      </div>
+      <div class="fquick">${VARIANTS.filter(v => counts[v]).map(v => `<button class="fchip" data-var="${esc(v)}" aria-pressed="${state.variants.has(v)}">${esc(v)} <small>${counts[v]}</small></button>`).join("")}</div>
+      <div class="frow2">
+        <input id="q" type="search" placeholder="Karte oder Nummer" value="${esc(state.q)}">
+        <select id="sort" aria-label="Sortierung">${Object.entries(SORTS).map(([k, [l]]) => `<option value="${k}" ${state.sort === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+      </div>
+    </div>
+    <p class="resultinfo">${num(rows.length)} Specs</p>
+    ${rows.length ? `<ul class="list">${rows.slice(0, state.shown).map(row).join("")}</ul>` : `<p class="empty">Keine Karten für diese Auswahl.</p>`}
+    ${rows.length > state.shown ? `<button class="ghost more" id="more">Weitere ${num(Math.min(120, rows.length - state.shown))} anzeigen</button>` : ""}
+    <p class="note">Pop: PSA Population Report (alle Noten inkl. halber Noten). Verkäufe: PSA Auction Prices Realized über PSA CardFacts, in US-Dollar ohne Versand. „Best Offer“-Preise können vom tatsächlich gezahlten Betrag abweichen. Gem-Rate = Anteil PSA 10 an allen gegradeten Exemplaren dieser Spec.</p>
+  </main>`;
+  bind();
+}
+
+function row(c) {
+  const rel = c.last_10_usd != null ? `${usd(c.last_10_usd)}<small>PSA 10 · ${dateDE(c.last_10_on)}</small>`
+    : c.last_9_usd != null ? `${usd(c.last_9_usd)}<small>PSA 9 · ${dateDE(c.last_9_on)}</small>` : `<small>keine Verkäufe</small>`;
+  return `<li><button class="row" data-spec="${c.spec_id}">
+    <span><span class="name">${esc(c.name || c.subject)}</span>
+      <span class="rset">${esc(setLabel(c.set_key))} · #${esc(c.card_number)}</span>
+      <span class="meta">${tags(c)}</span>
+      <span class="nums">PSA 10 <b>${num(c.g10)}</b> · PSA 9 ${num(c.g9)} · Gesamt ${num(c.total)} · Gem ${pct(c.gem_rate)}</span></span>
+    <span class="price">${rel}</span></button></li>`;
+}
+
+function bind() {
+  document.querySelectorAll("[data-set]").forEach(b => b.onclick = () => { state.set = b.dataset.set; state.shown = 120; save(); render(); });
+  document.querySelectorAll("[data-scope]").forEach(b => b.onclick = () => { state.scope = b.dataset.scope; save(); render(); });
+  document.querySelectorAll("[data-ed]").forEach(b => b.onclick = () => { state.edition = b.dataset.ed; save(); render(); });
+  document.querySelectorAll("[data-var]").forEach(b => b.onclick = () => {
+    const v = b.dataset.var; state.variants.has(v) ? state.variants.delete(v) : state.variants.add(v); save(); render();
+  });
+  document.querySelectorAll("[data-spec]").forEach(b => b.onclick = () => openCard(Number(b.dataset.spec)));
+  const q = $("#q");
+  q.oninput = () => { state.q = q.value; clearTimeout(q._t); q._t = setTimeout(() => { const pos = q.selectionStart; render(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
+  $("#sort").onchange = e => { state.sort = e.target.value; save(); render(); };
+  const more = $("#more"); if (more) more.onclick = () => { state.shown += 120; render(); };
+}
+
+/* ---------- Karte: Pop je Note + Verkäufe je Note, wie bei PSA ---------- */
+const LADDER = [
+  ["10", "Grade10", 10], ["9", "Grade9", 9], ["8.5", "Grade8_5", 8.5], ["8", "Grade8", 8], ["7.5", "Grade7_5", 7.5], ["7", "Grade7", 7],
+  ["6.5", "Grade6_5", 6.5], ["6", "Grade6", 6], ["5.5", "Grade5_5", 5.5], ["5", "Grade5", 5], ["4.5", "Grade4_5", 4.5], ["4", "Grade4", 4],
+  ["3.5", "Grade3_5", 3.5], ["3", "Grade3", 3], ["2.5", "Grade2_5", 2.5], ["2", "Grade2", 2], ["1.5", "Grade1_5", 1.5], ["1", "Grade1", 1], ["Auth", "GradeN0", null],
+];
+const gradeColor = g => g === 10 ? "var(--g10)" : g === 9 ? "var(--g9)" : g === 8 ? "var(--g8)" : "var(--gx)";
+
+async function openCard(specId) {
+  const c = state.stats.find(x => x.spec_id === specId);
+  if (!c) return;
+  const sheet = openSheet(`<div class="sheet-head"><div><h2>${esc(c.name || c.subject)}</h2><p class="muted" style="margin:4px 0 0">${esc(setLabel(c.set_key))} · #${esc(c.card_number)}</p></div><button class="ghost" data-close>Fertig</button></div><p class="muted">Lade Pop und Verkäufe …</p>`);
+  const [pop, hist, sales, spec] = await Promise.all([
+    db.from("vintage_pop_latest").select("*").eq("spec_id", specId).maybeSingle(),
+    db.from("vintage_pop").select("snap_date,total,g10,g9").eq("spec_id", specId).order("snap_date"),
+    db.from("vintage_sales").select("*").eq("spec_id", specId).order("sold_on", { ascending: false }).limit(2000),
+    db.from("vintage_specs").select("cardfacts_path,subject,variety").eq("spec_id", specId).maybeSingle(),
+  ]);
+  const err = [pop, hist, sales, spec].find(r => r.error);
+  if (err) { sheet.innerHTML += `<p class="err">${esc(err.error.message)}</p>`; return; }
+  const S = sales.data || [];
+  const G = (pop.data && pop.data.grades) || {};
+  const set = setOf(c.set_key);
+  // Pop höher und Verkäufe je Note
+  let higher = 0;
+  const ladder = LADDER.map(([label, key, g]) => {
+    const p = G[key] || 0;
+    const q = g == null ? 0 : (G[key + "Q"] || 0);
+    const ss = S.filter(s => g == null ? s.grade == null : Number(s.grade) === g);
+    const r = { label, g, pop: p, popQ: q, higher, n: ss.length, last: ss[0], avg5: ss.length ? ss.slice(0, 5).reduce((a, s) => a + Number(s.price_usd || 0), 0) / Math.min(5, ss.length) : null };
+    higher += p + q;
+    return r;
+  }).filter(r => r.pop || r.popQ || r.n || ["10", "9", "8", "7"].includes(r.label));
+  const h = hist.data || [];
+  const first = h[0], lastH = h[h.length - 1];
+  const growth = h.length >= 2 && first.total ? `${num(lastH.total - first.total)} seit ${dateDE(first.snap_date)}` : "Verlauf ab dem zweiten Abruf";
+  const cfLink = spec.data && spec.data.cardfacts_path ? `<a class="ghost" href="${PSA}${esc(spec.data.cardfacts_path)}" target="_blank" rel="noopener">PSA CardFacts</a>` : "";
+  const popLink = set.pop_heading_id ? `<a class="ghost" href="${PSA}/pop/tcg-cards/${esc(String(set.release_date || "").slice(0, 4))}/x/${set.pop_heading_id}" target="_blank" rel="noopener">PSA Pop Report</a>` : "";
+
+  sheet.innerHTML = `
+    <div class="sheet-head"><div><h2>${esc(c.name || c.subject)}</h2>
+      <p class="muted" style="margin:4px 0 0">${esc(set.name)} · #${esc(c.card_number)} · PSA: ${esc(c.subject)}${spec.data && spec.data.variety ? " · " + esc(spec.data.variety) : ""}</p>
+      <p class="meta">${tags(c)}</p></div>
+      <button class="ghost" data-close>Fertig</button></div>
+    <div class="kpis">
+      <div class="kpi"><div class="kl">Gegradet gesamt</div><div class="kv">${num(c.total)}</div><div class="ks">${esc(growth)}</div></div>
+      <div class="kpi"><div class="kl">PSA 10</div><div class="kv">${num(c.g10)}</div><div class="ks">Gem-Rate ${pct(c.gem_rate)}</div></div>
+      <div class="kpi"><div class="kl">PSA 9</div><div class="kv">${num(c.g9)}</div><div class="ks">10 zu 9: ${c.g9 ? (c.g10 / c.g9).toLocaleString("de-DE", { maximumFractionDigits: 2 }) : "–"}</div></div>
+      <div class="kpi"><div class="kl">Verkäufe erfasst</div><div class="kv">${num(S.length)}</div><div class="ks">neuester ${dateDE(S[0] && S[0].sold_on)}</div></div>
+    </div>
+    <h3>Population und Preise je Note</h3>
+    <p class="muted" style="margin:-4px 0 8px;font-size:13px">Pop-Stand ${dateDE(pop.data && pop.data.snap_date)}. Preise in US-Dollar aus den erfassten PSA-Verkäufen.</p>
+    <div class="tscroll"><table class="t">
+      <thead><tr><th>Note</th><th>Pop</th><th>Pop höher</th><th>Letzter Preis</th><th>Datum</th><th>Ø letzte 5</th><th>Verkäufe</th></tr></thead>
+      <tbody>${ladder.map(r => `<tr class="${r.label === "10" || r.label === "9" ? "hi" : ""}"><td>${r.label === "Auth" ? "Authentic" : "PSA " + r.label}</td><td>${num(r.pop)}${r.popQ ? ` <small class="muted">+${r.popQ} Q</small>` : ""}</td><td>${num(r.higher)}</td><td>${r.last ? usd(Number(r.last.price_usd)) : "–"}</td><td>${r.last ? dateS(r.last.sold_on) : "–"}</td><td>${usd(r.avg5)}</td><td>${num(r.n)}</td></tr>`).join("")}</tbody>
+    </table></div>
+    <h3>Verkäufe im Zeitverlauf</h3>
+    <div class="frow" id="gfilter">${[["", "Alle"], ["10", "PSA 10"], ["9", "PSA 9"], ["8", "PSA 8"], ["low", "≤ 7,5"]].map(([k, l]) => `<button class="fchip" data-g="${k}" aria-pressed="${k === ""}">${l}</button>`).join("")}</div>
+    <div id="chartbox"></div>
+    <h3>Einzelverkäufe</h3>
+    <div class="tscroll" id="salesbox"></div>
+    <div class="links">${cfLink}${popLink}</div>`;
+  sheet.querySelectorAll("[data-close]").forEach(b => b.onclick = closeSheet);
+  const draw = gk => {
+    const pick = s => gk === "" ? true : gk === "low" ? (s.grade != null && Number(s.grade) < 8) : Number(s.grade) === Number(gk);
+    const rows = S.filter(pick);
+    $("#chartbox", sheet).innerHTML = chart(rows, $("#chartbox", sheet).clientWidth);
+    bindChart($("#chartbox", sheet), rows);
+    $("#salesbox", sheet).innerHTML = rows.length ? `<table class="t sales"><thead><tr><th>Datum</th><th>Note</th><th>Preis</th><th>Art</th><th>Haus</th><th>Verkäufer</th><th>Cert</th></tr></thead><tbody>${rows.slice(0, 300).map(s => `<tr><td>${dateS(s.sold_on)}</td><td>${s.grade == null ? "Auth" : esc(s.grade_label || s.grade)}</td><td>${usd(Number(s.price_usd))}</td><td>${esc(s.sale_type || "")}</td><td>${esc(s.auction_house || "")}</td><td>${esc(s.seller || "")}</td><td>${s.cert ? `<a href="${PSA}/cert/${esc(s.cert)}" target="_blank" rel="noopener">${esc(s.cert)}</a>` : ""}</td></tr>`).join("")}</tbody></table>${rows.length > 300 ? `<p class="muted" style="font-size:13px">Die neuesten 300 von ${num(rows.length)} Verkäufen.</p>` : ""}` : `<p class="muted">Keine Verkäufe erfasst.</p>`;
+  };
+  sheet.querySelectorAll("[data-g]").forEach(b => b.onclick = () => {
+    sheet.querySelectorAll("[data-g]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    draw(b.dataset.g);
+  });
+  draw("");
+}
+
+// Streudiagramm: Preis (log) über Zeit, Farbe = Note (10/9/8, Rest grau)
+function chart(rows, width) {
+  const pts = rows.filter(s => s.price_usd > 0);
+  if (pts.length < 2) return "";
+  const W = Math.max(300, Math.round(width || 760)), H = W < 500 ? 220 : 260, L = 52, R = 12, T = 12, B = 26;
+  const xs = pts.map(s => new Date(s.sold_on + "T12:00:00").getTime());
+  const ys = pts.map(s => Number(s.price_usd));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs) || x0 + 1;
+  const ly0 = Math.log10(Math.min(...ys)), ly1 = Math.log10(Math.max(...ys));
+  const lo = Math.floor(ly0), hi = Math.max(lo + 1, Math.ceil(ly1));
+  const X = t => L + (W - L - R) * ((t - x0) / Math.max(1, x1 - x0));
+  const Y = v => T + (H - T - B) * (1 - (Math.log10(v) - lo) / (hi - lo));
+  const ticks = [];
+  for (let e = lo; e <= hi; e++) for (const m of [1, 3]) { const v = m * 10 ** e; if (Math.log10(v) >= lo && Math.log10(v) <= hi) ticks.push(v); }
+  const years = [];
+  for (let y = new Date(x0).getFullYear() + 1; y <= new Date(x1).getFullYear(); y++) years.push(y);
+  const step = Math.ceil(years.length / 6) || 1;
+  const order = s => s.grade == 10 ? 3 : s.grade == 9 ? 2 : s.grade == 8 ? 1 : 0;
+  const dots = pts.map((s, i) => ({ s, i })).sort((a, b) => order(a.s) - order(b.s)).map(({ s, i }) =>
+    `<circle cx="${X(xs[i]).toFixed(1)}" cy="${Y(ys[i]).toFixed(1)}" r="4.5" fill="${gradeColor(s.grade == null ? null : Number(s.grade))}" stroke="var(--surface)" stroke-width="2" data-i="${i}"/>`).join("");
+  const present = new Set(pts.map(s => s.grade == 10 ? 10 : s.grade == 9 ? 9 : s.grade == 8 ? 8 : 0));
+  const leg = [[10, "PSA 10"], [9, "PSA 9"], [8, "PSA 8"], [0, "andere Noten"]].filter(([g]) => present.has(g));
+  return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verkaufspreise über die Zeit">
+    ${ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v >= 1000 ? (v / 1000) + "k" : v} $</text>`).join("")}
+    ${years.filter((y, i) => i % step === 0).map(y => { const t = new Date(y, 0, 1).getTime(); return `<text x="${X(t)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--muted)">${y}</text>`; }).join("")}
+    ${dots}</svg>
+    ${leg.length > 1 ? `<div class="legend">${leg.map(([g, l]) => `<span><i style="background:${gradeColor(g || null)}"></i>${l}</span>`).join("")}</div>` : ""}
+    <div class="tip" hidden></div></div>`;
+}
+
+function bindChart(box, rows) {
+  const svg = box.querySelector("svg"), tip = box.querySelector(".tip");
+  if (!svg) return;
+  const pts = rows.filter(s => s.price_usd > 0);
+  const show = ev => {
+    const t = ev.target.closest("circle");
+    if (!t) { tip.hidden = true; return; }
+    const s = pts[Number(t.dataset.i)];
+    const r = box.getBoundingClientRect(), c = t.getBoundingClientRect();
+    tip.innerHTML = `<b>${usd(Number(s.price_usd))}</b> · ${s.grade == null ? "Auth" : "PSA " + esc(s.grade_label || s.grade)}<br><span class="muted">${dateDE(s.sold_on)} · ${esc(s.sale_type || "")}</span>`;
+    tip.style.left = (c.left - r.left + c.width / 2) + "px";
+    tip.style.top = (c.top - r.top) + "px";
+    tip.hidden = false;
+  };
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; });
+}
+
+/* ---------- Blätter (wie im Tracker) ---------- */
+function openSheet(html) {
+  closeSheet();
+  const el = document.createElement("div");
+  el.className = "backdrop";
+  el.id = "sheet";
+  el.innerHTML = `<section class="sheet" role="dialog" aria-modal="true">${html}</section>`;
+  el.addEventListener("click", e => { if (e.target === el) closeSheet(); });
+  document.body.appendChild(el);
+  document.body.classList.add("lock");
+  const sheet = el.firstElementChild;
+  sheet.querySelectorAll("[data-close]").forEach(b => b.onclick = closeSheet);
+  return sheet;
+}
+function closeSheet() {
+  const el = $("#sheet");
+  if (el) el.remove();
+  document.body.classList.remove("lock");
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#sheet")) closeSheet(); });
+
+let uid = null;
+db.auth.onAuthStateChange((event, session) => {
+  const id = session && session.user ? session.user.id : null;
+  if (id === uid && event !== "INITIAL_SESSION") return;
+  uid = id;
+  setTimeout(() => { id ? load() : renderLogin(); }, 0);
+});
+})();
+</script>
+</body>
+</html>
