@@ -80,6 +80,13 @@ input:focus,select:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var
 .sbig{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 .ssub{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 
+/* Maus statt Finger: nichts seitlich wischen müssen, Kacheln und Chips umbrechen */
+@media (hover:hover) and (pointer:fine){
+  .sets{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));margin:0 0 14px!important;padding:2px 0 6px!important;overflow:visible}
+  .settile{width:auto}
+  .fquick,.grades{flex-wrap:wrap;overflow:visible}
+  .grades{margin-left:0;margin-right:0;padding-left:0;padding-right:0}
+}
 /* Filter */
 .filters{display:grid;gap:8px;margin:0 0 10px}
 .frow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
