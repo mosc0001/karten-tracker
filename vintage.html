@@ -90,7 +90,15 @@ input:focus,select:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var
 /* Liste */
 .list{list-style:none;margin:0;padding:0;background:var(--surface);border-radius:14px;overflow:hidden}
 .list li+li{border-top:.5px solid var(--line)}
-.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;width:100%;text-align:left;background:none;border:0;padding:11px 16px}
+.row{display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:14px;align-items:center;width:100%;text-align:left;background:none;border:0;padding:10px 16px}
+.thumb{width:52px;height:72px;object-fit:contain;border-radius:5px;background:var(--fill);display:block;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+@media (max-width:599px){.row{grid-template-columns:44px minmax(0,1fr) auto;gap:12px;padding:10px 14px}.thumb{width:44px;height:61px}}
+.dhead{display:grid;grid-template-columns:120px minmax(0,1fr);gap:16px;align-items:start}
+@media (min-width:760px){.dhead{grid-template-columns:170px minmax(0,1fr)}}
+.dart{width:100%;aspect-ratio:63/88;object-fit:contain;border-radius:8px;background:var(--fill);box-shadow:0 8px 20px rgba(0,0,0,.25);cursor:zoom-in}
+.lightbox{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(0,0,0,.6);cursor:zoom-out}
+.lightbox img{max-width:min(90vw,620px);max-height:86vh;border-radius:14px}
+.imgnote{font-size:12px;color:var(--muted);margin:6px 0 0}
 .row:hover{background:var(--fill)}
 .name{font-weight:600;font-size:16px}
 .rset{display:block;color:var(--muted);font-size:13px;margin-top:1px}
@@ -222,6 +230,11 @@ async function load() {
 }
 
 const setIdx = key => { const s = state.sets.find(x => x.set_key === key); return s ? s.sort_order : 99; };
+// Kartenbilder wie im Tracker (pokemontcg.io); Reverse Holos zeigen das Bild der Normalversion
+const imgUrl = (c, hires) => {
+  const num = String(c.card_number || "").replace(/[ab]$/i, "");
+  return num ? `https://images.pokemontcg.io/${c.set_key.replace("-1st", "")}/${encodeURIComponent(num)}${hires ? "_hires" : ""}.png` : "";
+};
 const setOf = key => state.sets.find(s => s.set_key === key) || { name: key, tcg_set: key };
 const setLabel = key => { const s = setOf(key); return s.tcg_set + (key.endsWith("-1st") ? " 1st Ed." : ""); };
 const tags = c => [
@@ -311,6 +324,7 @@ function row(c) {
   const rel = c.last_10_usd != null ? `${usd(c.last_10_usd)}<small>PSA 10 · ${dateDE(c.last_10_on)}</small>`
     : c.last_9_usd != null ? `${usd(c.last_9_usd)}<small>PSA 9 · ${dateDE(c.last_9_on)}</small>` : `<small>keine Verkäufe</small>`;
   return `<li><button class="row" data-spec="${c.spec_id}">
+    <img class="thumb" src="${imgUrl(c)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
     <span><span class="name">${esc(c.name || c.subject)}</span>
       <span class="rset">${esc(setLabel(c.set_key))} · #${esc(c.card_number)}</span>
       <span class="meta">${tags(c)}</span>
@@ -372,10 +386,14 @@ async function openCard(specId) {
   const popLink = set.pop_heading_id ? `<a class="ghost" href="${PSA}/pop/tcg-cards/${esc(String(set.release_date || "").slice(0, 4))}/x/${set.pop_heading_id}" target="_blank" rel="noopener">PSA Pop Report</a>` : "";
 
   sheet.innerHTML = `
-    <div class="sheet-head"><div><h2>${esc(c.name || c.subject)}</h2>
+    <div class="sheet-head"><span></span><button class="ghost" data-close>Fertig</button></div>
+    <div class="dhead">
+      <div><img class="dart" id="dart" src="${imgUrl(c, true)}" alt="${esc(c.subject)}" onerror="this.style.visibility='hidden'">
+        ${/^Reverse/.test(c.variant || "") ? `<p class="imgnote">Bild zeigt die Normalversion</p>` : ""}</div>
+      <div><h2>${esc(c.name || c.subject)}</h2>
       <p class="muted" style="margin:4px 0 0">${esc(set.name)} · #${esc(c.card_number)} · PSA: ${esc(c.subject)}${spec.data && spec.data.variety ? " · " + esc(spec.data.variety) : ""}</p>
       <p class="meta">${tags(c)}</p></div>
-      <button class="ghost" data-close>Fertig</button></div>
+    </div>
     <div class="kpis">
       <div class="kpi"><div class="kl">Gegradet gesamt</div><div class="kv">${num(c.total)}</div><div class="ks">${esc(growth)}</div></div>
       <div class="kpi"><div class="kl">PSA 10</div><div class="kv">${num(c.g10)}</div><div class="ks">Gem-Rate ${pct(c.gem_rate)}</div></div>
@@ -395,6 +413,13 @@ async function openCard(specId) {
     <div class="tscroll" id="salesbox"></div>
     <div class="links">${cfLink}${popLink}</div>`;
   sheet.querySelectorAll("[data-close]").forEach(b => b.onclick = closeSheet);
+  $("#dart", sheet).onclick = e => {
+    const lb = document.createElement("div");
+    lb.className = "lightbox";
+    lb.innerHTML = `<img src="${e.target.src}" alt="">`;
+    lb.onclick = () => lb.remove();
+    document.body.appendChild(lb);
+  };
   const draw = gk => {
     const pick = s => gk === "" ? true : gk === "low" ? (s.grade != null && Number(s.grade) < 8) : Number(s.grade) === Number(gk);
     const rows = S.filter(pick);
