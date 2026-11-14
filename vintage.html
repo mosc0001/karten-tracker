@@ -360,7 +360,7 @@ async function openCard(specId) {
   const ladder = LADDER.map(([label, key, g]) => {
     const p = G[key] || 0;
     const q = g == null ? 0 : (G[key + "Q"] || 0);
-    const ss = S.filter(s => g == null ? s.grade == null : Number(s.grade) === g);
+    const ss = S.filter(s => (g == null ? s.grade == null : Number(s.grade) === g) && Number(s.price_usd) > 0);
     const r = { label, g, pop: p, popQ: q, higher, n: ss.length, last: ss[0], avg5: ss.length ? ss.slice(0, 5).reduce((a, s) => a + Number(s.price_usd || 0), 0) / Math.min(5, ss.length) : null };
     higher += p + q;
     return r;
@@ -400,7 +400,7 @@ async function openCard(specId) {
     const rows = S.filter(pick);
     $("#chartbox", sheet).innerHTML = chart(rows, $("#chartbox", sheet).clientWidth);
     bindChart($("#chartbox", sheet), rows);
-    $("#salesbox", sheet).innerHTML = rows.length ? `<table class="t sales"><thead><tr><th>Datum</th><th>Note</th><th>Preis</th><th>Art</th><th>Haus</th><th>Verkäufer</th><th>Cert</th></tr></thead><tbody>${rows.slice(0, 300).map(s => `<tr><td>${dateS(s.sold_on)}</td><td>${s.grade == null ? "Auth" : esc(s.grade_label || s.grade)}</td><td>${usd(Number(s.price_usd))}</td><td>${esc(s.sale_type || "")}</td><td>${esc(s.auction_house || "")}</td><td>${esc(s.seller || "")}</td><td>${s.cert ? `<a href="${PSA}/cert/${esc(s.cert)}" target="_blank" rel="noopener">${esc(s.cert)}</a>` : ""}</td></tr>`).join("")}</tbody></table>${rows.length > 300 ? `<p class="muted" style="font-size:13px">Die neuesten 300 von ${num(rows.length)} Verkäufen.</p>` : ""}` : `<p class="muted">Keine Verkäufe erfasst.</p>`;
+    $("#salesbox", sheet).innerHTML = rows.length ? `<table class="t sales"><thead><tr><th>Datum</th><th>Note</th><th>Preis</th><th>Art</th><th>Haus</th><th>Verkäufer</th><th>Cert</th></tr></thead><tbody>${rows.slice(0, 300).map(s => `<tr><td>${dateS(s.sold_on)}</td><td>${s.grade == null ? "Auth" : esc(s.grade_label || s.grade)}</td><td>${Number(s.price_usd) > 0 ? usd(Number(s.price_usd)) : "–"}</td><td>${esc(s.sale_type || "")}</td><td>${esc(s.auction_house || "")}</td><td>${esc(s.seller || "")}</td><td>${s.cert ? `<a href="${PSA}/cert/${esc(s.cert)}" target="_blank" rel="noopener">${esc(s.cert)}</a>` : ""}</td></tr>`).join("")}</tbody></table>${rows.length > 300 ? `<p class="muted" style="font-size:13px">Die neuesten 300 von ${num(rows.length)} Verkäufen.</p>` : ""}` : `<p class="muted">Keine Verkäufe erfasst.</p>`;
   };
   sheet.querySelectorAll("[data-g]").forEach(b => b.onclick = () => {
     sheet.querySelectorAll("[data-g]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
