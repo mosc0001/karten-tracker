@@ -36,8 +36,8 @@ button:disabled{opacity:.45;cursor:default}
 :focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 70%,transparent);outline-offset:2px}
 h1,h2,h3{margin:0;line-height:1.15;letter-spacing:-.02em}
 a{color:var(--accent)}
-.wrap{max-width:1180px;margin:0 auto;padding:0 20px 120px}
-.wrap.wide{max-width:1180px}
+.wrap{--gutter:clamp(20px,3.2vw,72px);max-width:2400px;margin:0 auto;padding:0 var(--gutter) 120px}
+.wrap.wide{max-width:2400px}
 .pad{padding:24px 20px}
 .muted{color:var(--muted)}
 .err{color:var(--danger)}
@@ -88,6 +88,15 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
   .sleeve{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:end;padding:30px 32px;min-height:300px}
   .hero-art{display:block;width:150px}
 }
+/* Große Fenster: Inhalt füllt die Breite, Karten und Kopfbereich wachsen mit */
+@media (min-width:1400px){
+  .sleeve{min-height:clamp(300px,19vw,440px);padding:clamp(30px,2.2vw,48px) clamp(32px,2.6vw,56px)}
+  .hero-art{width:clamp(150px,10.5vw,240px)}
+  .total{font-size:clamp(4rem,4.2vw,5.5rem)}
+  .spark svg{height:clamp(96px,8vw,170px)}
+  .shelf-row li{width:clamp(164px,10.2vw,240px)}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(clamp(172px,10.5vw,240px),1fr))}
+}
 
 /* Regale */
 .shelf{margin:0 0 30px}
@@ -103,7 +112,7 @@ body.scrolled .top .ntitle{opacity:1;transform:none}
 .shelf.fits .shelf-nav{visibility:hidden}
 /* Mit dem Finger wird gewischt: dort keine Pfeile */
 @media (hover:none) and (pointer:coarse){.shelf-nav{display:none}}
-.shelf-row{--bleed:calc((100vw - 100%) / 2);list-style:none;margin:0 calc(-1 * var(--bleed));padding:4px var(--bleed) 14px;display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x proximity;scroll-padding:0 20px;scrollbar-width:none}
+.shelf-row{--bleed:calc((100vw - 100%) / 2);list-style:none;margin:0 calc(-1 * var(--bleed));padding:4px var(--bleed) 14px;display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x proximity;scroll-padding:0 var(--gutter,20px);scrollbar-width:none}
 .shelf-row::-webkit-scrollbar{display:none}
 .shelf-row li{flex:none;width:128px;scroll-snap-align:start}
 @media (min-width:760px){.shelf-row li{width:164px}.shelf-row{gap:20px;scroll-snap-type:none}}
@@ -315,6 +324,8 @@ input:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 45
   @media (prefers-reduced-motion:no-preference){.sheet{animation:pop .28s cubic-bezier(.2,.9,.25,1)}@keyframes pop{from{transform:scale(.96);opacity:0}}}
 }
 .sheet{--spt:22px;--spx:20px}
+/* Große Fenster: Detailansicht breiter, damit Verkaufslisten und Tabellen Platz haben */
+@media (min-width:1400px){.sheet{max-width:min(1180px,62vw)}}
 @media (min-width:760px){.sheet{--spt:26px;--spx:30px}}
 /* Kopf mit Titel und Schließen bleibt beim Scrollen im Fenster stehen (Glas) */
 .sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;position:sticky;top:calc(-1 * var(--spt));z-index:3;
