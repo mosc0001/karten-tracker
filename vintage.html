@@ -87,6 +87,18 @@ input:focus,select:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var
   .fquick,.grades{flex-wrap:wrap;overflow:visible}
   .grades{margin-left:0;margin-right:0;padding-left:0;padding-right:0}
 }
+/* Rechner: linke Spalte kompakt, damit die Kartenliste oben beginnt */
+@media (min-width:1024px){
+  .sets{grid-template-columns:1fr 1fr!important;gap:6px!important}
+  .settile{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:7px 10px;border-radius:10px}
+  .settile .ssub{display:none}
+  .sname{font-size:13px}
+  .sbig{font-size:13px;font-weight:600;color:var(--muted)}
+  .settile[aria-pressed="true"] .sbig{color:var(--ink)}
+  .ltitle{font-size:28px}
+  .warn{font-size:12px;padding:7px 10px}
+}
+@media (min-width:1400px){.shell{grid-template-columns:480px minmax(0,1fr)}}
 /* Filter */
 .filters{display:grid;gap:8px;margin:0 0 10px}
 .frow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -433,7 +445,11 @@ function listRow(c) {
 
 function bindList() {
   const side = $("#side");
-  side.querySelectorAll("[data-set]").forEach(b => b.onclick = () => { state.set = b.dataset.set; state.shown = 150; save(); renderList(); });
+  side.querySelectorAll("[data-set]").forEach(b => b.onclick = () => {
+    state.set = b.dataset.set; state.shown = 150; save(); renderList();
+    const cur = state.stats.find(c => c.spec_id === view.spec);
+    if (desktop() && (!cur || (state.set && setOf(cur.set_key).tcg_set !== state.set))) { const f = filtered()[0]; if (f) go(f.spec_id); }
+  });
   side.querySelectorAll("[data-scope]").forEach(b => b.onclick = () => { state.scope = b.dataset.scope; save(); renderList(); });
   side.querySelectorAll("[data-ed]").forEach(b => b.onclick = () => { state.edition = b.dataset.ed; save(); renderList(); });
   side.querySelectorAll("[data-var]").forEach(b => b.onclick = () => { const v = b.dataset.var; state.variants.has(v) ? state.variants.delete(v) : state.variants.add(v); save(); renderList(); });
@@ -458,6 +474,10 @@ function route() {
   const id = m ? Number(m[1]) : null;
   const shell = $("#shell");
   if (!shell) return;
+  if (!id && desktop()) {               // am Rechner nie leer: erste Karte der Liste öffnen
+    const first = filtered()[0];
+    if (first) { location.replace(`#/k/${first.spec_id}`); return; }
+  }
   if (!id || !state.stats.some(c => c.spec_id === id)) {
     const wasCard = shell.dataset.view === "card";
     view.spec = null;
