@@ -143,6 +143,10 @@ input:focus,select:focus{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var
 .iconbtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;background:var(--fill);border:0;border-radius:50%;color:var(--ink)}
 .iconbtn svg{width:18px;height:18px}
 .iconbtn:disabled{opacity:.35}
+.favbtn[aria-pressed="true"]{color:#FFB800}
+.favchip svg{width:14px;height:14px;color:#FFB800}
+.favchip[aria-pressed="true"] svg{color:#FFB800}
+.favmark{color:#FFB800}
 .hero{display:grid;gap:14px;padding:16px 0 4px}
 .hero .art{justify-self:center;width:min(62vw,250px)}
 .art img{width:100%;aspect-ratio:63/88;object-fit:contain;border-radius:10px;background:var(--fill);box-shadow:0 12px 30px rgba(0,0,0,.28);display:block;cursor:zoom-in}
@@ -246,6 +250,8 @@ const pct = n => n == null ? "–" : new Intl.NumberFormat("de-DE", { maximumFra
 const dateDE = d => d ? new Date(d + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–";
 const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const ICON = {
+  star: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>`,
+  starOn: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>`,
   back: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`,
   up: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>`,
   down: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
@@ -268,9 +274,44 @@ const LADDER = [
 ];
 const gradeColor = g => g === 10 ? "var(--g10)" : g === 9 ? "var(--g9)" : g === 8 ? "var(--g8)" : "var(--gx)";
 
-const state = { sets: [], stats: [], runs: [], set: "", scope: "u", variants: new Set(), edition: "", q: "", sort: "nr", shown: 150 };
+const state = { sets: [], stats: [], runs: [], set: "", scope: "u", variants: new Set(), edition: "", q: "", sort: "nr", shown: 150, favOnly: false, favs: new Set(), favLocal: false };
 try { Object.assign(state, JSON.parse(localStorage.getItem("vt_state") || "{}"), { shown: 150 }); state.variants = new Set(state.variants || []); } catch (e) { /* ohne Speicher */ }
-const save = () => { try { localStorage.setItem("vt_state", JSON.stringify({ set: state.set, scope: state.scope, variants: [...state.variants], edition: state.edition, sort: state.sort })); } catch (e) { /* ohne Speicher */ } };
+const save = () => { try { localStorage.setItem("vt_state", JSON.stringify({ set: state.set, scope: state.scope, variants: [...state.variants], edition: state.edition, sort: state.sort, favOnly: state.favOnly })); } catch (e) { /* ohne Speicher */ } };
+
+/* ---------- Favoriten: in Supabase (Handy und Rechner gleich), sonst nur in diesem Browser ---------- */
+const localFavs = () => { try { return JSON.parse(localStorage.getItem("vt_favs") || "[]"); } catch (e) { return []; } };
+const saveLocalFavs = () => { try { localStorage.setItem("vt_favs", JSON.stringify([...state.favs])); } catch (e) { /* ohne Speicher */ } };
+async function loadFavs() {
+  const { data, error } = await db.from("vintage_favorites").select("spec_id");
+  if (error) { state.favLocal = true; state.favs = new Set(localFavs()); return; }
+  state.favLocal = false;
+  state.favs = new Set(data.map(r => Number(r.spec_id)));
+  // Favoriten, die vor dem Anlegen der Tabelle nur im Browser lagen, einmalig übernehmen
+  const pending = localFavs().filter(id => !state.favs.has(id));
+  if (pending.length) {
+    const r = await db.from("vintage_favorites").upsert(pending.map(spec_id => ({ spec_id })), { onConflict: "user_id,spec_id" });
+    if (!r.error) { pending.forEach(id => state.favs.add(id)); try { localStorage.removeItem("vt_favs"); } catch (e) { /* egal */ } }
+  }
+}
+async function toggleFav(id) {
+  const on = !state.favs.has(id);
+  on ? state.favs.add(id) : state.favs.delete(id);
+  refreshFavUi();
+  if (state.favLocal) { saveLocalFavs(); return; }
+  const r = on ? await db.from("vintage_favorites").insert({ spec_id: id })
+               : await db.from("vintage_favorites").delete().eq("spec_id", id);
+  if (r.error) {                                   // zurückdrehen und Fehler zeigen
+    on ? state.favs.delete(id) : state.favs.add(id);
+    refreshFavUi();
+    alert("Favorit konnte nicht gespeichert werden: " + r.error.message);
+  }
+}
+function refreshFavUi() {
+  const star = $("#fav");
+  if (star) { const on = state.favs.has(view.spec); star.setAttribute("aria-pressed", String(on)); star.innerHTML = on ? ICON.starOn : ICON.star; star.setAttribute("aria-label", on ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"); }
+  renderList();
+  markCurrent();
+}
 // Kartenseite: gewählte Note, Reiter, Ansicht der Verkäufe
 const view = { spec: null, grade: null, tab: "sales", allGrades: false, shownSales: 25, setQ: "", setSort: "nr" };
 const cache = new Map();
@@ -316,6 +357,7 @@ async function load() {
       db.from("vintage_runs").select("*").order("at", { ascending: false }).limit(10).then(r => { if (r.error) throw r.error; return r.data; }),
     ]);
     Object.assign(state, { sets, stats, runs });
+    await loadFavs();
     $("#app").innerHTML = `<div class="shell" id="shell" data-view="list"><aside class="side pane" id="side"></aside><main class="detail pane" id="detail"></main></div>`;
     renderList();
     route();
@@ -371,6 +413,9 @@ const isGrade = (s, g) => g == null ? s.grade == null : Number(s.grade) === g;
 /* ---------- Liste (Handy: Startseite, Rechner: linke Spalte) ---------- */
 function filtered() {
   const q = state.q.trim().toLowerCase();
+  if (state.favOnly) {                       // Favoriten: alle markierten Karten, nur die Suche filtert
+    return state.stats.filter(c => state.favs.has(c.spec_id) && (!q || (c.subject + " " + c.card_number).toLowerCase().includes(q))).sort(SORTS[state.sort][1]);
+  }
   let rows = state.stats.filter(c =>
     (state.scope === "all" || c.in_universe) &&
     (!state.set || setOf(c.set_key).tcg_set === state.set) &&
@@ -415,17 +460,19 @@ function renderList() {
     ${setTiles()}
     <div class="filters">
       <div class="frow">
-        <div class="seg" role="group" aria-label="Umfang">
+        <button class="fchip favchip" id="favonly" aria-pressed="${state.favOnly}">${ICON.starOn} Favoriten <small>${num(state.favs.size)}</small></button>
+        <div class="seg" role="group" aria-label="Umfang" ${state.favOnly ? "hidden" : ""}>
           <button data-scope="u" aria-pressed="${state.scope === "u"}">Universum</button>
           <button data-scope="all" aria-pressed="${state.scope === "all"}">Alle</button>
         </div>
-        <div class="seg" role="group" aria-label="Edition">
+        <div class="seg" role="group" aria-label="Edition" ${state.favOnly ? "hidden" : ""}>
           <button data-ed="" aria-pressed="${!state.edition}">Alle</button>
           <button data-ed="1st Edition" aria-pressed="${state.edition === "1st Edition"}">1st</button>
           <button data-ed="Unlimited" aria-pressed="${state.edition === "Unlimited"}">Unl.</button>
         </div>
       </div>
-      <div class="fquick">${VARIANTS.filter(v => counts[v]).map(v => `<button class="fchip" data-var="${esc(v)}" aria-pressed="${state.variants.has(v)}">${esc(v)} <small>${counts[v]}</small></button>`).join("")}</div>
+      ${state.favOnly ? `<p class="info" style="margin:0">Zeigt alle Favoriten, unabhängig von Set und Filtern.${state.favLocal ? " Gespeichert nur in diesem Browser, bis vintage-favoriten.sql in Supabase ausgeführt ist." : ""}</p>` : ""}
+${state.favOnly ? "" : `<div class="fquick">${VARIANTS.filter(v => counts[v]).map(v => `<button class="fchip" data-var="${esc(v)}" aria-pressed="${state.variants.has(v)}">${esc(v)} <small>${counts[v]}</small></button>`).join("")}</div>`}
       <div class="frow2">
         <input id="q" type="search" placeholder="Karte oder Nummer" value="${esc(state.q)}">
         <select id="sort" aria-label="Sortierung">${Object.entries(SORTS).map(([k, [l]]) => `<option value="${k}" ${state.sort === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
@@ -448,7 +495,7 @@ function listRow(c) {
     : c.last_9_usd != null ? `${usd(Number(c.last_9_usd))}<small>PSA 9 · ${dateDE(c.last_9_on)}</small>` : `<small>keine Verkäufe</small>`;
   return `<li><button class="row" data-spec="${c.spec_id}" aria-current="${view.spec === c.spec_id}">
     <img class="thumb" src="${imgUrl(c)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
-    <span><span class="name">${esc(c.name || c.subject)}</span>
+    <span><span class="name">${state.favs.has(c.spec_id) ? `<span class="favmark" aria-label="Favorit">★</span> ` : ""}${esc(c.name || c.subject)}</span>
       <span class="rset">${esc(setLabel(c.set_key))} · #${esc(c.card_number)}</span>
       <span class="meta">${tags(c)}</span>
       <span class="nums">PSA 10 <b>${num(c.g10)}</b> · PSA 9 ${num(c.g9)} · Ges. ${num(c.total)} · Gem ${pct(c.gem_rate)}</span></span>
@@ -463,6 +510,11 @@ function bindList() {
     if (desktop() && (!cur || (state.set && setOf(cur.set_key).tcg_set !== state.set))) { const f = filtered()[0]; if (f) go(f.spec_id); }
   });
   side.querySelectorAll("[data-scope]").forEach(b => b.onclick = () => { state.scope = b.dataset.scope; save(); renderList(); });
+  $("#favonly").onclick = () => {
+    state.favOnly = !state.favOnly; state.shown = 150; save(); renderList();
+    const f = filtered();
+    if (desktop() && f.length && !f.some(c => c.spec_id === view.spec)) go(f[0].spec_id);
+  };
   side.querySelectorAll("[data-ed]").forEach(b => b.onclick = () => { state.edition = b.dataset.ed; save(); renderList(); });
   side.querySelectorAll("[data-var]").forEach(b => b.onclick = () => { const v = b.dataset.var; state.variants.has(v) ? state.variants.delete(v) : state.variants.add(v); save(); renderList(); });
   const q = $("#q");
@@ -580,6 +632,7 @@ function topBar(c) {
   return `<div class="dtop">
     <button class="iconbtn back" id="back" aria-label="Zurück">${ICON.back}</button>
     <span class="dt">#${esc(c.card_number)} ${esc(c.subject)}</span>
+    <button class="iconbtn favbtn" id="fav" aria-pressed="${state.favs.has(view.spec)}" aria-label="${state.favs.has(view.spec) ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}" title="Favorit (Taste F)">${state.favs.has(view.spec) ? ICON.starOn : ICON.star}</button>
     <button class="iconbtn" id="prev" aria-label="Vorherige Karte" ${i <= 0 ? "disabled" : ""}>${ICON.up}</button>
     <button class="iconbtn" id="next" aria-label="Nächste Karte" ${i < 0 || i >= rows.length - 1 ? "disabled" : ""}>${ICON.down}</button>
   </div>`;
@@ -587,6 +640,7 @@ function topBar(c) {
 function bindTop() {
   const b = $("#back"); if (b) b.onclick = () => { location.hash = ""; };
   const p = $("#prev"); if (p) p.onclick = () => step(-1);
+  const f = $("#fav"); if (f) f.onclick = () => toggleFav(view.spec);
   const n = $("#next"); if (n) n.onclick = () => step(1);
 }
 function step(dir) {
@@ -747,6 +801,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") { const lb = $(".lightbox"); if (lb) { lb.remove(); return; } if (!desktop() && view.spec) location.hash = ""; return; }
   if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName)) return;
   if (!$("#shell")) return;
+  if ((e.key === "f" || e.key === "F") && view.spec && !e.metaKey && !e.ctrlKey) { e.preventDefault(); toggleFav(view.spec); return; }
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     const rows = filtered();
