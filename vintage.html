@@ -212,6 +212,9 @@ table.t tr.tot td{font-weight:700;border-bottom:0}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
 .tip{position:absolute;pointer-events:none;background:var(--glass);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:var(--shadow);border-radius:10px;padding:7px 10px;font-size:13px;white-space:nowrap;z-index:2;transform:translate(-50%,-112%)}
 .links{display:grid;gap:8px}
+a.prow.cl{color:var(--accent);text-decoration:none;font-weight:600}
+a.prow.cl:hover{background:var(--fill)}
+a.prow.cl .muted{font-weight:400}
 .links a{display:flex;justify-content:space-between;align-items:center;background:var(--surface);border-radius:12px;padding:13px 14px;text-decoration:none;color:var(--ink);font-weight:500}
 .links a span{color:var(--muted);font-size:13px;font-weight:400}
 .placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;height:80vh;color:var(--muted);text-align:center;gap:6px}
@@ -353,6 +356,15 @@ const tags = c => [
   c.variant && c.variant !== "Non-Holo" ? `<span class="tag foil">${esc(c.variant)}</span>` : `<span class="tag">Non-Holo</span>`,
   c.edition === "1st Edition" ? `<span class="tag first">1st Ed.</span>` : c.edition === "Unlimited" ? `<span class="tag">Unlimited</span>` : "",
 ].join("");
+// Card Ladder: nur ein Link zur Suche (Sales History), keine Daten werden abgerufen – das verbieten die Nutzungsbedingungen
+const cardLadderUrl = (c, gradeLabel) => {
+  const set = setOf(c.set_key);
+  const parts = [set.name || set.tcg_set, c.name || c.subject, "#" + c.card_number];
+  if (c.edition === "1st Edition" && !/1st Edition/i.test(set.name || "")) parts.push("1st Edition");
+  if (/^Reverse/.test(c.variant || "")) parts.push("Reverse Foil");
+  if (gradeLabel && gradeLabel !== "Auth") parts.push("PSA " + gradeLabel);
+  return "https://app.cardladder.com/sales-history?" + new URLSearchParams({ q: parts.join(" "), sort: "date", direction: "desc" });
+};
 const priced = s => Number(s.price_usd) > 0;
 const isGrade = (s, g) => g == null ? s.grade == null : Number(s.grade) === g;
 
@@ -550,6 +562,7 @@ async function renderCard() {
           <li><button class="prow" data-jump="pop"><span>Population ${g.label === "Auth" ? "Authentic" : "PSA " + g.label}</span><span><span class="pv">${num(g.pop)}</span> <span class="muted">von ${num(c.total)}</span><span class="chev">›</span></span></button></li>
           <li class="prow"><span>Gem-Rate (Anteil PSA 10)</span><span class="pv">${pct(c.gem_rate)}</span></li>
           <li class="prow"><span>Verkäufe erfasst</span><span class="pv">${num(d.sales.length)}</span></li>
+          <li><a class="prow cl" href="${esc(cardLadderUrl(c, g.label))}" target="_blank" rel="noopener"><span>In Card Ladder öffnen <span class="muted">· ${g.label === "Auth" ? "alle Noten" : "PSA " + g.label}, aktuelle Verkäufe</span></span><span class="chev">↗</span></a></li>
         </ul>
       </div>
     </section>
@@ -633,6 +646,7 @@ function tabHtml(c, d, ladder, g) {
     const qs = encodeURIComponent(`${c.name || c.subject} ${c.card_number} ${set.tcg_set} ${c.edition === "1st Edition" ? "1st Edition " : ""}${/^Reverse/.test(c.variant || "") ? "Reverse " : ""}${gl}`);
     return `<div class="thead"><h3>Kaufen und prüfen</h3><span class="muted" style="font-size:13px">Suche: ${esc(decodeURIComponent(qs))}</span></div>
       <div class="links">
+        <a href="${esc(cardLadderUrl(c, view.grade))}" target="_blank" rel="noopener">Verkäufe in Card Ladder <span>${view.grade === "Auth" ? "alle Noten" : "PSA " + esc(view.grade)} ↗</span></a>
         <a href="https://www.ebay.de/sch/i.html?_nkw=${qs}" target="_blank" rel="noopener">Angebote auf eBay.de <span>öffnet eBay ›</span></a>
         <a href="https://www.ebay.com/sch/i.html?_nkw=${qs}" target="_blank" rel="noopener">Angebote auf eBay.com <span>öffnet eBay ›</span></a>
         <a href="https://www.ebay.de/sch/i.html?_nkw=${qs}&LH_Sold=1&LH_Complete=1" target="_blank" rel="noopener">Verkaufte Artikel auf eBay.de <span>aktuelle Preise ›</span></a>
