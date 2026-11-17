@@ -38,6 +38,8 @@ jobs:
         with:
           node-version: 22
       - name: eBay-Verkäufe abfragen und Werte berechnen
+        # cmd statt PowerShell: Windows blockiert PowerShell-Skripte standardmäßig (läuft auch auf Linux/macOS: dort bash)
+        shell: ${{ runner.os == 'Windows' && 'cmd' || 'bash' }}
         run: node scripts/ebay-sales.mjs
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
