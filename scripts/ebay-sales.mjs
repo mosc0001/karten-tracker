@@ -3,7 +3,8 @@
 // Ablauf pro Durchlauf:
 //   1. Karten laden, fehlende TCGdex-Angaben (Kartenanzahl des Sets, Ausführungen) nachtragen
 //   2. Fällige Karten nach Wert sortieren und innerhalb der Budgetgrenzen auswählen
-//   3. Eine gebündelte Suche bei Apify (alle Karten in einem Lauf)
+//   3. Suche: mit EBAY_SCRAPER=own selbst (kostenlos, nur von einem Heimanschluss aus), sonst ein gebündelter Apify-Lauf
+//      (Detailseiten laufen weiter über Apify: nur dort stehen der echte Preisvorschlagsbetrag und die Steuerangabe)
 //   4. Detailseiten nur für Treffer, bei denen Zustand oder Sprache im Titel fehlen
 //   5. Verkäufe speichern, dann für ALLE Karten den Wert neu berechnen (auch ohne neue Abfrage)
 
@@ -11,6 +12,7 @@ import {
   parseSale, matchCard, cardFromRow, toDbRow, saleFromDb, rowFromDb, triage, snapshotPayload, saleKey, queryKey, setIdOf, numberVariants, autoQueries, withSiblingFacts,
   manualSaleRow, plainQueries,
 } from "./ebay-logic.mjs";
+import { scrapeSearches, BlockedError } from "./ebay-scrape.mjs";
 
 const env = process.env;
 const num = (v, d) => (v !== undefined && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : d);
@@ -21,6 +23,12 @@ const CFG = {
   supabaseKey: env.SUPABASE_SECRET_KEY || "",
   apifyToken: env.APIFY_TOKEN || "",
   actor: env.EBAY_ACTOR || "memo23~ebay-search-scraper-ppe",
+  // own = Suchseiten selbst abrufen (kostenlos; eBay sperrt aber Rechenzentren, also nur auf einem eigenen Rechner),
+  // apify = wie bisher. Bei einer Sperre hört "own" für den Rest des Laufs auf (siehe ownFallback).
+  scraper: String(env.EBAY_SCRAPER || "apify").toLowerCase(),
+  ownDelayMs: num(env.EBAY_OWN_DELAY_MS, 2500),       // Pause zwischen zwei eigenen Abrufen
+  // Sperrt eBay den eigenen Abruf: "none" = restliche Karten bleiben fällig (nächster Lauf), "apify" = Rest über Apify
+  ownFallback: String(env.EBAY_OWN_FALLBACK || "none").toLowerCase(),
   runBudget: num(env.EBAY_RUN_BUDGET_USD, 1.2),       // höchstens so viel pro Durchlauf (Schätzung)
   monthBudget: num(env.EBAY_MONTH_BUDGET_USD, 4.0),   // höchstens so viel pro Monat (Schätzung)
   // Einzelabfrage (manueller Start mit Kartenangabe): nur diese Karte(n), unabhängig von Fälligkeit und Monatsbudget
@@ -133,6 +141,39 @@ async function runActor(input, label, capUsd) {
 }
 
 const proxy = { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "DE" };
+const OWN = CFG.scraper === "own";
+// Eigene Suchen kosten nichts: Schätzungen für die Suche auf null, Detailseiten bleiben bei Apify
+if (OWN) { COST.searchRun = 0; COST.searchUrl = 0; COST.searchRow = 0; }
+const own = { searches: 0, rows: 0, blocked: null };
+
+/* Suchen ausführen: selbst (EBAY_SCRAPER=own) oder über Apify. Bei einer Sperre des eigenen Abrufs bleibt der Rest
+   unerledigt (undone), außer EBAY_OWN_FALLBACK=apify. Gibt { items, usd, apifyUrls, undone } zurück. */
+async function runSearch(queries, rows, label, capUsd) {
+  let items = [], rest = queries;
+  if (OWN && !own.blocked) {
+    try {
+      // eigene Abrufe kosten nichts: mindestens eine volle Seite (60) holen, das macht die Historie vollständiger
+      items = await scrapeSearches(queries.map((q) => ({ q, maxItems: Math.max(rows, 60) })), { delayMs: CFG.ownDelayMs });
+      rest = [];
+      own.searches += queries.length;
+    } catch (e) {
+      if (!(e instanceof BlockedError)) throw e;
+      own.blocked = e.message;
+      items = e.partial || [];
+      const done = new Set(e.done || []);
+      own.searches += done.size;
+      rest = queries.filter((q) => !done.has(q));
+      const viaApify = CFG.ownFallback === "apify" && CFG.apifyToken;
+      log(`${e.message}. ${rest.length} Suche(n) ${viaApify ? "gehen an Apify" : "bleiben für den nächsten Lauf liegen"}.`);
+    }
+    own.rows += items.length;
+    if (!rest.length) log(`${label}: ${queries.length} Suchen selbst abgerufen, ${items.length} Zeilen.`);
+  }
+  if (!rest.length) return { items, usd: 0, apifyUrls: 0, undone: [] };
+  if (OWN && !(CFG.ownFallback === "apify" && CFG.apifyToken)) return { items, usd: 0, apifyUrls: 0, undone: rest };
+  const r = await runActor({ startUrls: rest.map((q) => ({ url: searchUrl(q) })), marketplace: "ebay.de", detailedItems: false, maxItems: rows, proxy }, label, capUsd);
+  return { items: [...items, ...r.items], usd: r.usd, apifyUrls: rest.length, undone: [] };
+}
 const searchUrl = (q) => `https://www.ebay.de/sch/i.html?_nkw=${encodeURIComponent(q).replace(/%20/g, "+")}&LH_Sold=1&LH_Complete=1&_sop=13`;
 const qKey = queryKey;
 // Suchbegriffe einer Karte: eigener Suchbegriff, sonst die beiden automatischen (Setname und Kartennummer)
@@ -268,7 +309,7 @@ async function main() {
   const BUCKETS = [...new Set([CFG.updateRows, 30, 60, 120, CFG.backfillRows])].filter((b) => b >= CFG.updateRows && b <= CFG.backfillRows).sort((a, b) => a - b);
   const bucket = (n) => BUCKETS.find((b) => b >= n) || CFG.backfillRows;
   const salesByCard = new Map();
-  if (CFG.apifyToken) {
+  if (CFG.apifyToken || OWN) {
     for (const r of await sbAll(`ebay_sales?select=card_id,sold_at,title&sold_at=gte.${new Date(now - 90 * DAY).toISOString()}`)) {
       if (!salesByCard.has(r.card_id)) salesByCard.set(r.card_id, []);
       salesByCard.get(r.card_id).push(r);
@@ -302,13 +343,14 @@ async function main() {
   const backfill = [], update = [], searches = [];
   const isDue = (c, i) => !c.ebay_checked_at || now - new Date(c.ebay_checked_at) > (i < CFG.topN ? CFG.topEveryDays : CFG.restEveryDays) * DAY;
   const dueTotal = ranked.filter(isDue).length;
-  if (CFG.apifyToken && budget > 0) {
+  if (OWN || (CFG.apifyToken && budget > 0)) {
     const picked = new Set();
     ranked.forEach((c, i) => {
       if (picked.has(c.id) || !(CFG.onlyCard ? onlyIds.has(c.id) : isDue(c, i))) return;
       const ss = searchesFor(c);
       const est = ss.reduce((a, x) => a + x.est + x.expected * detailShare * COST.detailPage, 0);
-      if (est > budget) return;
+      // eigene Suche: alle fälligen Karten (kostenlos); Detailseiten begrenzt später das Apify-Budget
+      if (!OWN && est > budget) return;
       budget -= est;
       searches.push(...ss);
       picked.add(c.id);
@@ -332,6 +374,7 @@ async function main() {
   /* 3. Gebündelte Suche: ein Apify-Lauf je Trefferzahl */
   const searchRowsByCard = new Map(); // cardId -> Suchzeilen (aus beiden Suchen, mit Herkunft)
   const requested = new Map();        // cardId -> angeforderte Treffer der Setnamen-Suche (für den Lücken-Wächter)
+  const incomplete = new Set();       // Karten mit nicht abgerufener Suche (eigener Abruf gesperrt)
   for (const x of searches) if (x.src === "set") requested.set(x.card.id, x.rows);
   for (const rows of BUCKETS) {
     const group = searches.filter((x) => x.rows === rows);
@@ -343,17 +386,19 @@ async function main() {
       if (!byQ.has(k)) byQ.set(k, { q: x.q, items: [] });
       byQ.get(k).items.push(x);
     }
-    const urls = [...byQ.values()].map((x) => ({ url: searchUrl(x.q) }));
+    const qs = [...byQ.values()].map((x) => x.q);
     try {
-      log(`${label}: ${urls.length} Suchen in einem Lauf ...`);
+      log(`${label}: ${qs.length} Suchen${!OWN ? " in einem Lauf" : !own.blocked ? " (selbst)" : CFG.ownFallback === "apify" && CFG.apifyToken ? " über Apify (eigener Abruf gesperrt)" : " übersprungen (eigener Abruf gesperrt)"} ...`);
       const spentSoFar = stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow;
-      const { items, usd } = await runActor({ startUrls: urls, marketplace: "ebay.de", detailedItems: false, maxItems: rows, proxy }, label, available - spentSoFar);
-      stats.searchRuns++; stats.urls += urls.length;
-      if (usd !== null) { stats.apifyUsd += usd; stats.apifyUsdKnown = true; }
+      const { items, usd, apifyUrls, undone } = await runSearch(qs, rows, label, available - spentSoFar);
+      // nicht abgerufene Suchen: Karte gilt als nicht abgefragt und bleibt fällig
+      for (const q of undone) for (const x of byQ.get(qKey(q)).items) incomplete.add(x.card.id);
+      if (apifyUrls) { stats.searchRuns++; stats.urls += apifyUrls; }
+      if (usd !== null && apifyUrls) { stats.apifyUsd += usd; stats.apifyUsdKnown = true; }
       const rowsByQ = new Map();
       for (const it of items) {
         if (it._analytics || !it.itemId) continue;
-        stats.searchRows++;
+        if (it._source !== "own") stats.searchRows++;
         const k = rowQuery(it);
         if (!k) continue;
         if (!rowsByQ.has(k)) rowsByQ.set(k, []);
@@ -367,7 +412,7 @@ async function main() {
         }
       }
       const maxGot = Math.max(0, ...[...rowsByQ.values()].map((v) => v.length));
-      if (rows > 100 && maxGot <= 100 && maxGot > 0) log(`Hinweis: ${rows} Treffer angefordert, Apify lieferte höchstens ${maxGot} je Suche.`);
+      if (!OWN && rows > 100 && maxGot <= 100 && maxGot > 0) log(`Hinweis: ${rows} Treffer angefordert, Apify lieferte höchstens ${maxGot} je Suche.`);
       stats.ok++;
     } catch (e) {
       console.error(`${label} fehlgeschlagen: ${e.message}`);
@@ -376,7 +421,8 @@ async function main() {
   }
 
   /* 4. Neue Verkäufe, Vorauswahl, Detailseiten */
-  const processed = ranked.filter((c) => searchRowsByCard.has(c.id));
+  if (incomplete.size) log(`${incomplete.size} Karte(n) nicht vollständig abgefragt, sie bleiben fällig.`);
+  const processed = ranked.filter((c) => searchRowsByCard.has(c.id) && !incomplete.has(c.id));
   const existing = new Map(); // cardId -> Map(key -> Tabellenzeile)
   if (processed.length) {
     const ids = processed.map((c) => c.id).join(",");
@@ -509,7 +555,7 @@ async function main() {
     const res = matchCard(cardFromRow(c), sales, { now });
     return res.relaxedN + res.rejected.filter((x) => x.reason === "condition" || x.reason === "unknown_condition").length;
   };
-  const plainCand = CFG.apifyToken ? processed.filter((c) => !(c.ebay_query && c.ebay_query.trim()) && !(c.tcg_meta && c.tcg_meta.searchMode === "plain") &&
+  const plainCand = (CFG.apifyToken || OWN) ? processed.filter((c) => !(c.ebay_query && c.ebay_query.trim()) && !(c.tcg_meta && c.tcg_meta.searchMode === "plain") &&
     !(c.tcg_meta && c.tcg_meta.plainTried && now - new Date(c.tcg_meta.plainTried) < CFG.plainRetryDays * DAY)) : [];
   if (plainCand.length) {
     const stored = new Map();
@@ -528,7 +574,8 @@ async function main() {
     }
     const plainEst = (n) => COST.searchRun + n * 2 * (COST.searchUrl + 80 * COST.searchRow);
     let take = Math.min(tests.length, CFG.plainMaxCards);
-    while (take > 0 && plainEst(take) > available - estSoFar() - 0.05) take--;
+    while (!OWN && take > 0 && plainEst(take) > available - estSoFar() - 0.05) take--;
+    if (OWN && own.blocked) take = 0; // eigener Abruf gesperrt: Test auf einen späteren Lauf verschieben
     if (tests.length) log(`Ausweichsuche: ${tests.length} Karte(n) mit weniger als ${CFG.plainMinSales} passenden Verkäufen, dieser Lauf testet ${take}.`);
     const run = tests.slice(0, take);
     if (run.length) {
@@ -540,14 +587,14 @@ async function main() {
       }
       let got = null;
       try {
-        const { items, usd } = await runActor({ startUrls: [...byQ.values()].map((x) => ({ url: searchUrl(x.q) })), marketplace: "ebay.de", detailedItems: false, maxItems: CFG.backfillRows, proxy },
-          "Ausweichsuche", available - estSoFar());
-        stats.searchRuns++; stats.urls += byQ.size;
-        if (usd !== null) { stats.apifyUsd += usd; stats.apifyUsdKnown = true; }
+        const { items, usd, apifyUrls, undone } = await runSearch([...byQ.values()].map((x) => x.q), CFG.backfillRows, "Ausweichsuche", available - estSoFar());
+        if (apifyUrls) { stats.searchRuns++; stats.urls += apifyUrls; }
+        if (usd !== null && apifyUrls) { stats.apifyUsd += usd; stats.apifyUsdKnown = true; }
+        if (undone.length) throw new Error("eigener Abruf gesperrt, Test folgt später");
         got = new Map();
         for (const it of items) {
           if (it._analytics || !it.itemId) continue;
-          stats.searchRows++;
+          if (it._source !== "own") stats.searchRows++;
           const k = rowQuery(it);
           if (!k) continue;
           if (!got.has(k)) got.set(k, []);
@@ -793,14 +840,15 @@ async function main() {
   /* 7. Protokoll */
   const est = (stats.searchRuns ? stats.searchRuns * COST.searchRun + stats.urls * COST.searchUrl + stats.searchRows * COST.searchRow : 0) +
     stats.detailRuns * COST.detailRun + stats.detailPages * COST.detailPage;
-  if (stats.searchRuns || stats.detailRuns || stats.failed) {
+  if (OWN) log(`Eigener Abruf: ${own.searches} Suchen, ${own.rows} Zeilen${own.blocked ? `; danach gesperrt (${own.blocked})` : ""}.`);
+  if (stats.searchRuns || stats.detailRuns || stats.failed || own.searches) {
     await sb("ebay_runs", {
       method: "POST", headers: { Prefer: "return=minimal" },
       body: JSON.stringify({
-        cards: stats.cards, rows: stats.searchRows, detail_pages: stats.detailPages,
+        cards: stats.cards, rows: stats.searchRows + own.rows, detail_pages: stats.detailPages,
         est_cost_usd: Math.round(est * 1000) / 1000,
         apify_cost_usd: stats.apifyUsdKnown ? Math.round(stats.apifyUsd * 1000) / 1000 : null,
-        note: stats.failed ? `${stats.failed} Lauf/Läufe fehlgeschlagen` : null,
+        note: [stats.failed ? `${stats.failed} Lauf/Läufe fehlgeschlagen` : "", own.searches ? `eigener Abruf: ${own.searches} Suchen` : "", own.blocked ? `eigener Abruf gesperrt: ${own.blocked}` : ""].filter(Boolean).join("; ") || null,
       }),
     });
   }
@@ -810,8 +858,8 @@ async function main() {
   await writeStatus({
     at: new Date().toISOString(),
     ok: !hardFail,
-    partial: stats.failed > 0 && !hardFail,
-    message: stats.failed ? `${stats.failed} Apify-Lauf/Läufe fehlgeschlagen` : null,
+    partial: (stats.failed > 0 && !hardFail) || Boolean(own.blocked),
+    message: [stats.failed ? `${stats.failed} Apify-Lauf/Läufe fehlgeschlagen` : "", own.blocked ? `eBay hat den eigenen Abruf gesperrt, ${incomplete.size} Karte(n) folgen beim nächsten Lauf` : ""].filter(Boolean).join("; ") || null,
     loaded: backfill.length,
     updated: update.length,
     waiting: Math.max(0, dueTotal - backfill.length - update.length),

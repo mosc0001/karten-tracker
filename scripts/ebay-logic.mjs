@@ -119,7 +119,7 @@ const MULTI_TITLE_RX = /\b(trio|big 3|you choose|choose|all \d+|alle \d+|lot|bun
 
 /* ---------- Sprache ---------- */
 function langFromField(v) {
-  const t = norm(v);
+  const t = norm(v).replace(/ß/g, "ss");
   if (/german|deutsch|allemand|tedesco|aleman/.test(t)) return "DE";
   if (/english|englisch|inglese|anglais|ingles/.test(t)) return "EN";
   if (/ital/.test(t)) return "IT";
@@ -250,7 +250,7 @@ const COUNTRY_NAMES = [
 export function countryFromText(v) {
   if (typeof v !== "string" || !v.trim()) return null;
   if (/^[A-Za-z]{2}$/.test(v.trim())) return v.trim().toUpperCase() === "UK" ? "GB" : v.trim().toUpperCase();
-  const t = norm(v);
+  const t = norm(v).replace(/ß/g, "ss");
   for (const [name, code] of COUNTRY_NAMES) {
     if (new RegExp(`(^|[^a-z])${name}([^a-z]|$)`).test(t)) return code; // Namen bestehen nur aus Buchstaben und Leerzeichen
   }
