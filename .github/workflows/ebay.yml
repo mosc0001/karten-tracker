@@ -37,9 +37,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Windows blockiert PowerShell-Skripte standardmäßig: dort per cmd starten, sonst (GitHub, Linux) per bash
       - name: eBay-Verkäufe abfragen und Werte berechnen
-        # cmd statt PowerShell: Windows blockiert PowerShell-Skripte standardmäßig (läuft auch auf Linux/macOS: dort bash)
-        shell: ${{ runner.os == 'Windows' && 'cmd' || 'bash' }}
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: node scripts/ebay-sales.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          # own = eBay-Suche selbst abrufen (nur auf deinem Rechner), sonst Apify. Detailseiten laufen immer über Apify.
+          EBAY_SCRAPER: ${{ (vars.EBAY_RUNNER == 'self-hosted' && github.event.inputs.apify != 'true') && 'own' || 'apify' }}
+          # Pause zwischen zwei eigenen eBay-Abrufen in Millisekunden (höflich bleiben, nicht gesperrt werden)
+          EBAY_OWN_DELAY_MS: "2500"
+          # Kostenbremse in Dollar (Schätzung). Hier kannst du die Werte ändern.
+          EBAY_MONTH_BUDGET_USD: "192.0"
+          EBAY_RUN_BUDGET_USD: "7.0"
+          EBAY_IMAGE_BUDGET_USD: "5.0"
+          # die wertvollsten Karten wöchentlich, alle übrigen alle 28 Tage
+          EBAY_TOP_N: "15"
+          EBAY_TOP_EVERY_DAYS: "7"
+          EBAY_REST_EVERY_DAYS: "14"
+          # Einzelabfrage über "Run workflow" mit Kartenangabe: höchstens so viel, auch bei erreichtem Monatsbudget
+          EBAY_ONLY_CARD: ${{ github.event.inputs.karte }}
+          EBAY_ONLY_BUDGET_USD: "5.0"
+      - name: eBay-Verkäufe abfragen und Werte berechnen
+        if: runner.os != 'Windows'
+        shell: bash
         run: node scripts/ebay-sales.mjs
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
