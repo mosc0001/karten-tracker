@@ -11,11 +11,6 @@ on:
         description: "Nur diese Karte abfragen (leer = normaler Lauf). Name, z. B. Machamp, oder Name | Set, z. B. Machamp | Expedition"
         required: false
         default: ""
-      apify:
-        description: "Diesmal über Apify auf GitHub laufen lassen (kostet), statt auf deinem Rechner"
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: write   # nur für das Lebenszeichen (leerer Commit), siehe letzter Schritt
@@ -24,13 +19,10 @@ concurrency:
   group: ebay-sales
   cancel-in-progress: false
 
-# Wo der Job läuft, steuert die Repository-Variable EBAY_RUNNER (Settings → Secrets and variables → Actions → Variables):
-#   self-hosted  = auf deinem eigenen Rechner (GitHub-Runner). Die Suche ruft eBay dann selbst ab, kostenlos.
-#                  Ist der Rechner aus, wartet der Lauf bis zu 24 Stunden, bis er wieder an ist.
-#   leer         = wie bisher auf GitHub, Suche über Apify (eBay sperrt GitHub-Server für eigene Abrufe).
 jobs:
   ebay:
-    runs-on: ${{ (vars.EBAY_RUNNER == 'self-hosted' && github.event.inputs.apify != 'true') && 'self-hosted' || 'ubuntu-latest' }}
+    # Immer auf GitHub: der eigene Abruf vom PC wird von eBay gesperrt (403), siehe scripts/ebay-scrape.mjs
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +39,7 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           # own = eBay-Suche selbst abrufen (nur auf deinem Rechner), sonst Apify. Detailseiten laufen immer über Apify.
-          EBAY_SCRAPER: ${{ (vars.EBAY_RUNNER == 'self-hosted' && github.event.inputs.apify != 'true') && 'own' || 'apify' }}
+          EBAY_SCRAPER: apify
           # Pause zwischen zwei eigenen eBay-Abrufen in Millisekunden (höflich bleiben, nicht gesperrt werden)
           EBAY_OWN_DELAY_MS: "2500"
           # Kostenbremse in Dollar (Schätzung). Hier kannst du die Werte ändern.
@@ -70,7 +62,7 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           # own = eBay-Suche selbst abrufen (nur auf deinem Rechner), sonst Apify. Detailseiten laufen immer über Apify.
-          EBAY_SCRAPER: ${{ (vars.EBAY_RUNNER == 'self-hosted' && github.event.inputs.apify != 'true') && 'own' || 'apify' }}
+          EBAY_SCRAPER: apify
           # Pause zwischen zwei eigenen eBay-Abrufen in Millisekunden (höflich bleiben, nicht gesperrt werden)
           EBAY_OWN_DELAY_MS: "2500"
           # Kostenbremse in Dollar (Schätzung). Hier kannst du die Werte ändern.
